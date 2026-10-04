@@ -92,6 +92,12 @@ export type ThreadComponents = {
     | ComponentType<PropsWithChildren<{ group: ThreadGroupPart }>>
     | undefined;
   TaskGroup?: ComponentType<{ group: ThreadGroupPart }> | undefined;
+  /** Rendered in the scroll area directly after the messages. */
+  AfterMessages?: ComponentType | undefined;
+  /** Rendered in the sticky footer directly above the composer. */
+  BeforeComposer?: ComponentType | undefined;
+  /** Composer placeholder text. */
+  composerPlaceholder?: string | undefined;
 };
 
 const messageGroupBy = groupPartByType({
@@ -185,7 +191,11 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
   isEmpty,
   autoFocus,
 }) => {
-  const { Welcome = ThreadWelcome } = useContext(ThreadComponentsContext);
+  const {
+    Welcome = ThreadWelcome,
+    AfterMessages,
+    BeforeComposer,
+  } = useContext(ThreadComponentsContext);
 
   return (
     <ThreadPrimitive.Root
@@ -225,6 +235,8 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
             </ThreadPrimitive.Messages>
           </div>
 
+          {AfterMessages && <AfterMessages />}
+
           <ThreadPrimitive.ViewportFooter
             className={cn(
               "aui-thread-viewport-footer bg-background flex flex-col gap-4 overflow-visible pb-4 md:pb-6",
@@ -234,6 +246,7 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
           >
             <ThreadScrollToBottom />
             <ThreadFollowupSuggestions />
+            {BeforeComposer && <BeforeComposer />}
             <Composer autoFocus={autoFocus} />
             <AuiIf condition={(s) => isNewChatView(s) && s.composer.isEmpty}>
               <ThreadSuggestions />
@@ -397,10 +410,13 @@ const ThreadSuggestionItem: FC = () => {
 };
 
 const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
+  const { composerPlaceholder = "Send a message..." } = useContext(
+    ThreadComponentsContext,
+  );
   return (
     <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
       <ComposerPrimitive.AttachmentDropzone render={<div data-slot="aui_composer-shell" className="border-foreground/10 focus-within:border-foreground/25 data-[dragging=true]:border-ring flex w-full cursor-text flex-col gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) transition-[border-color] data-[dragging=true]:border-dashed data-[dragging=true]:bg-[color-mix(in_oklab,var(--color-accent)_50%,var(--color-background))]" />}><ComposerAttachments /><ComposerPrimitive.Input
-                      placeholder="Send a message..."
+                      placeholder={composerPlaceholder}
                       className="aui-composer-input caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base leading-6 outline-none"
                       rows={1}
                       autoFocus={autoFocus}
