@@ -90,7 +90,52 @@ export type UserEnvironmentTool = {
   packageName: string;
   packageVersion: string;
   setup?: string;
+  /** How the CLI expects its login (see toolAuth.ts). Absent = needs none. */
+  auth?: ToolAuth | null;
 };
+
+/**
+ * A tool's login declaration. `env`: the CLI reads these variables (injected
+ * per command). `file`: the CLI reads a credentials file at this path relative
+ * to $HOME (written 0600 while a Computer is live). Values live only in the
+ * encrypted tool_credentials store, never in the manifest.
+ */
+export type ToolAuth = { kind: "env"; vars: string[] } | { kind: "file"; path: string };
+
+export const TOOL_AUTH_LIMITS = Object.freeze({ vars: 16, pathChars: 200 });
+
+const ENV_VAR = /^[A-Z_][A-Z0-9_]{0,63}$/;
+const RESERVED_ENV = new Set(["PATH", "HOME", "USER", "SHELL", "PWD", "LD_PRELOAD", "LD_LIBRARY_PATH", "BASH_ENV", "ENV"]);
+const AUTH_PATH_SEGMENT = /^[A-Za-z0-9._-]{1,64}$/;
+
+/** Validates and canonicalizes a login declaration; null when none. */
+export function normalizeToolAuth(auth: unknown): ToolAuth | null {
+  if (auth === undefined || auth === null) return null;
+  if (typeof auth !== "object") throw new EnvironmentError("tool_auth_invalid");
+  const a = auth as { kind?: unknown; vars?: unknown; path?: unknown };
+  if (a.kind === "env") {
+    if (!Array.isArray(a.vars) || a.vars.length === 0 || a.vars.length > TOOL_AUTH_LIMITS.vars) {
+      throw new EnvironmentError("tool_auth_invalid", "env auth needs 1-16 variable names");
+    }
+    const vars = [...new Set(a.vars as unknown[])].map((v) => {
+      if (typeof v !== "string" || !ENV_VAR.test(v) || RESERVED_ENV.has(v) || v.startsWith("AUGUST_")) {
+        throw new EnvironmentError("tool_auth_invalid", "env auth variable names must be UPPER_SNAKE_CASE");
+      }
+      return v;
+    });
+    return { kind: "env", vars: vars.sort() };
+  }
+  if (a.kind === "file") {
+    const p = a.path;
+    if (typeof p !== "string" || p.length > TOOL_AUTH_LIMITS.pathChars) throw new EnvironmentError("tool_auth_invalid");
+    const segments = p.split("/");
+    if (segments.some((s) => !AUTH_PATH_SEGMENT.test(s) || s === "." || s === "..")) {
+      throw new EnvironmentError("tool_auth_invalid", "file auth path must be relative to $HOME, e.g. .config/notion/credentials.json");
+    }
+    return { kind: "file", path: p };
+  }
+  throw new EnvironmentError("tool_auth_invalid");
+}
 
 export type UserEnvironmentManifest = {
   format: typeof MANIFEST_FORMAT;
@@ -123,6 +168,7 @@ export function assertTool(tool: UserEnvironmentTool): void {
     }
     if (tool.setup.includes("\0")) throw new EnvironmentError("tool_setup_invalid");
   }
+  normalizeToolAuth(tool.auth);
 }
 
 function normalizeTool(tool: UserEnvironmentTool): UserEnvironmentTool {
@@ -133,6 +179,9 @@ function normalizeTool(tool: UserEnvironmentTool): UserEnvironmentTool {
     packageVersion: tool.packageVersion,
   };
   if (tool.setup !== undefined && tool.setup.trim().length > 0) out.setup = tool.setup;
+  // Only present when declared, so manifests without logins hash exactly as before.
+  const auth = normalizeToolAuth(tool.auth);
+  if (auth) out.auth = auth;
   return out;
 }
 

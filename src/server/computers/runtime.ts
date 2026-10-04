@@ -10,8 +10,19 @@ import { trace } from "../db/traces";
 import type { AuthorizedEffect, DispatchResult, EffectDraft } from "../effects/types";
 import type { ToolResult } from "../types/domain";
 import { getSpritesProvider, NOT_CONFIGURED, type SpriteError, type SpritesPort } from "../providers/sprites";
+import { loadToolCredentials, type LoadedCredential } from "../credentials/store";
 import { getActiveEnvironment, getPublishedGeneration } from "./environment";
+import { detectLocalInstalls } from "./localInstalls";
 import { getObjectVerified, putObjectVerified } from "./storage";
+import {
+  EMPTY_PLAN,
+  buildExecRequest,
+  planInjection,
+  redactOutput,
+  toolsWithAuth,
+  type InjectionPlan,
+  type ToolCredentialMaterial,
+} from "./toolAuth";
 import {
   ENVIRONMENT_LIMITS,
   boundOutput,
@@ -21,7 +32,6 @@ import {
   safeCommandText,
   shellQuote,
   spriteNameForSession,
-  withEnvPath,
   type CommandOutput,
   type ComputerLease,
   type ComputerLifecycle,
@@ -172,6 +182,101 @@ async function restoreEnvironment(
   return { ok: true };
 }
 
+// ---------------------------------------------------------------------------
+// CLI login injection (toolAuth.ts holds the pure rules)
+
+type Injection = { plan: InjectionPlan; versions: Map<string, string> };
+
+const NO_INJECTION: Injection = { plan: EMPTY_PLAN, versions: new Map() };
+
+/**
+ * Credentials for the tools in this pinned generation that declare a login.
+ * Never throws: a missing key or unreadable row means "run without the login".
+ */
+async function loadInjection(userId: string, generation: number): Promise<Injection> {
+  if (generation <= 0) return NO_INJECTION;
+  try {
+    const env = await getPublishedGeneration(userId, generation);
+    const declared = env ? toolsWithAuth(env.manifest) : [];
+    if (!env || declared.length === 0) return NO_INJECTION;
+    const loaded = await loadToolCredentials(userId, declared.map((d) => d.toolKey));
+    if (loaded.size === 0) return NO_INJECTION;
+    const materials = new Map<string, ToolCredentialMaterial>();
+    const versions = new Map<string, string>();
+    loaded.forEach((c: LoadedCredential, toolKey) => {
+      materials.set(toolKey, c.material);
+      versions.set(toolKey, c.updatedAt);
+    });
+    return { plan: planInjection(env.manifest, materials), versions };
+  } catch (err) {
+    console.error("[computers] credential injection skipped:", (err as Error).name);
+    return NO_INJECTION;
+  }
+}
+
+type WrittenFiles = Record<string, { path: string; updatedAt: string }>;
+
+async function readWrittenFiles(computerId: string): Promise<WrittenFiles> {
+  const { rows } = await query<{ credential_files: WrittenFiles | null }>(
+    `select credential_files from computers where id = $1`,
+    [computerId],
+  );
+  return rows[0]?.credential_files ?? {};
+}
+
+async function removeCredentialFiles(sprites: SpritesPort, spriteName: string, paths: string[]): Promise<boolean> {
+  if (paths.length === 0) return true;
+  const r = await sprites.exec(spriteName, {
+    command: `rm -f ${paths.map((p) => `"$HOME"/${shellQuote(p)}`).join(" ")}`,
+    timeoutMs: 30_000,
+    maxOutputBytes: 4096,
+  });
+  return r.ok && r.value.exitCode === 0;
+}
+
+/**
+ * Makes the credential files on a live Computer match the user's current
+ * logins for its pinned tools: writes new/changed files (0600 under $HOME),
+ * deletes ones whose login was removed. Best effort; never blocks the task.
+ */
+async function syncCredentialFiles(sprites: SpritesPort, row: ComputerRow): Promise<void> {
+  const [{ plan, versions }, written] = await Promise.all([
+    loadInjection(row.user_id, row.pinned_generation),
+    readWrittenFiles(row.id),
+  ]);
+  const next: WrittenFiles = {};
+  const stale: string[] = [];
+  for (const [toolKey, w] of Object.entries(written)) {
+    const want = plan.files.find((f) => f.toolKey === toolKey);
+    if (!want || want.path !== w.path) stale.push(w.path);
+  }
+  for (const f of plan.files) {
+    const updatedAt = versions.get(f.toolKey) ?? "";
+    const prior = written[f.toolKey];
+    if (prior && prior.path === f.path && prior.updatedAt === updatedAt) {
+      next[f.toolKey] = prior;
+      continue;
+    }
+    const dir = f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : "";
+    const home = await sprites.exec(row.provider_ref, {
+      command: `${dir ? `mkdir -p "$HOME"/${shellQuote(dir)} && ` : ""}printf '%s' "$HOME"`,
+      timeoutMs: 30_000,
+      maxOutputBytes: 4096,
+    });
+    const homeDir = home.ok && home.value.exitCode === 0 ? home.value.stdout.trim() : "";
+    if (!homeDir.startsWith("/")) continue;
+    const w = await sprites.writeFile(row.provider_ref, `${homeDir}/${f.path}`, Buffer.from(f.content, "utf8"), 0o600);
+    if (w.ok) next[f.toolKey] = { path: f.path, updatedAt };
+  }
+  if (stale.length > 0 && !(await removeCredentialFiles(sprites, row.provider_ref, stale))) {
+    // Keep tracking files we could not delete so release retries.
+    for (const [toolKey, w] of Object.entries(written)) if (!next[toolKey] && stale.includes(w.path)) next[toolKey] = w;
+  }
+  if (JSON.stringify(next) !== JSON.stringify(written)) {
+    await query(`update computers set credential_files = $2, updated_at = now() where id = $1`, [row.id, JSON.stringify(next)]);
+  }
+}
+
 /**
  * Returns the session's live Computer, creating one if needed. Reuse requires
  * positive provider readback; a vanished Sprite is marked `lost` and replaced
@@ -188,6 +293,7 @@ export async function acquireComputer(args: ComputerScope, deps: { sprites?: Spr
     const lifecycle = reconcileLifecycle(existing.lifecycle, seen.value?.status ?? null);
     if (lifecycle !== existing.lifecycle) await setLifecycle(existing.id, lifecycle);
     if (lifecycle === "running" || lifecycle === "dormant") {
+      await syncCredentialFiles(sprites, existing).catch(() => undefined);
       return result({
         status: "succeeded",
         data: toLease({ ...existing, lifecycle }, true),
@@ -252,6 +358,7 @@ export async function acquireComputer(args: ComputerScope, deps: { sprites?: Spr
   }
 
   await setLifecycle(row.id, "running");
+  await syncCredentialFiles(sprites, row).catch(() => undefined);
   await trace({
     userId: args.userId,
     responsibilityId: args.responsibilityId,
@@ -317,8 +424,11 @@ async function execOnLease(
   if (!row || (row.lifecycle !== "running" && row.lifecycle !== "dormant") || row.provider_ref !== lease.spriteName) {
     return { kind: "not_live" };
   }
+  const { plan } = await loadInjection(row.user_id, row.pinned_generation);
+  const req = buildExecRequest(command, plan, wrap);
   const r = await sprites.exec(row.provider_ref, {
-    command: wrap(withEnvPath(command)),
+    command: req.command,
+    env: req.env,
     timeoutMs,
     maxOutputBytes: 256 * 1024,
   });
@@ -326,18 +436,20 @@ async function execOnLease(
     if (r.error.code === "not_found") await setLifecycle(row.id, "lost");
     return { kind: "error", error: r.error };
   }
+  // Redact injected logins before bounding, so truncation can't split a value.
+  const raw = redactOutput(r.value, plan.secrets);
   const output: CommandOutput = {
-    exitCode: r.value.exitCode,
-    stdout: boundOutput(r.value.stdout),
-    stderr: boundOutput(r.value.stderr),
+    exitCode: raw.exitCode,
+    stdout: boundOutput(raw.stdout),
+    stderr: boundOutput(raw.stderr),
   };
   const commandId = await recordCommand({
     computerId: row.id,
     userId: lease.userId,
-    command,
-    exitCode: r.value.exitCode,
-    stdout: r.value.stdout,
-    safeOutput: boundOutput(`${r.value.stdout}\n${r.value.stderr}`.trim(), 2000),
+    command: req.recorded,
+    exitCode: raw.exitCode,
+    stdout: raw.stdout,
+    safeOutput: boundOutput(`${raw.stdout}\n${raw.stderr}`.trim(), 2000),
   });
   if (row.lifecycle !== "running") await setLifecycle(row.id, "running");
   return { kind: "ran", output, commandId, truncated: r.value.truncated };
@@ -366,6 +478,10 @@ export async function runOnComputer(
       return result({ status: "failed", safeSummary: "The computer was lost; acquire a new one (your tools are restored automatically)", retry: "safe" });
     }
     return blockedOrFailed("run the command", out.error);
+  }
+  const installed = out.output.exitCode === 0 ? detectLocalInstalls(args.command) : [];
+  if (installed.length > 0) {
+    await query(`update computer_commands set local_installs = $2 where id = $1`, [out.commandId, installed]);
   }
   await trace({
     userId: args.lease.userId,
@@ -530,6 +646,11 @@ export async function releaseComputer(
   if (!row) return result({ status: "failed", safeSummary: "Unknown computer", retry: "never" });
   if (row.lifecycle === "released") {
     return result({ status: "succeeded", data: { released: true, checkpointRef: null }, safeSummary: "Computer already released", retry: "safe" });
+  }
+  // Delete written login files first: a checkpoint or a failed destroy must not keep them.
+  const written = Object.values(await readWrittenFiles(row.id)).map((w) => w.path);
+  if (written.length > 0 && (await removeCredentialFiles(sprites, row.provider_ref, written))) {
+    await query(`update computers set credential_files = '{}', updated_at = now() where id = $1`, [row.id]);
   }
   let checkpointRef: string | null = null;
   if (options.checkpoint) {

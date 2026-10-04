@@ -209,6 +209,10 @@ export async function prepareEnvironmentChange(
       currentTools: current.manifest.tools.map(toolLabel),
       nextTools: nextManifest.tools.map(toolLabel),
       setupCommands: nextManifest.tools.filter((t) => t.setup).map((t) => ({ toolKey: t.toolKey, command: t.setup! })),
+      // Where each tool's login is injected (names/paths only; values are set in Logins).
+      ...(nextManifest.tools.some((t) => t.auth)
+        ? { logins: nextManifest.tools.filter((t) => t.auth).map((t) => ({ toolKey: t.toolKey, auth: t.auth! })) }
+        : {}),
     },
   });
 }

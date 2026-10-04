@@ -7,6 +7,7 @@ import type { SavedLogin } from "@/server/types/api";
 import { normalizeLoginOrigin } from "@/server/vault/origin";
 import { formatWhen } from "./format";
 import { SidePanel, SidePanelHeader } from "./SidePanel";
+import { ToolLogins } from "./ToolLogins";
 import { useFetched } from "./useFetched";
 
 const STATUS: Record<SavedLogin["status"], string> = {
@@ -48,26 +49,33 @@ export function LoginsPanel({ open, onClose }: { open: boolean; onClose: () => v
     <SidePanel open={open} onClose={onClose}>
       <SidePanelHeader
         title="Logins"
-        subtitle="August signs in for you on these sites only. Passwords go straight to an encrypted vault; August never sees them."
+        subtitle="August signs in for you on these sites and tools only. Secrets are stored encrypted and never shown again."
       />
       <div className="flex-1 overflow-y-auto px-6 pt-4 pb-8">
         <div className="flex flex-col gap-8">
-          <div>
-            {loading && !data ? (
-              <ListSkeleton />
-            ) : error ? (
-              <p className="text-muted-foreground text-sm">{error}</p>
-            ) : logins.length === 0 ? (
-              <p className="text-muted-foreground text-sm">No logins yet.</p>
-            ) : (
-              <ul className="flex flex-col divide-y">
-                {logins.map((l) => (
-                  <LoginRow key={l.id} login={l} onRemoved={reload} />
-                ))}
-              </ul>
-            )}
-          </div>
-          <AddLogin onAdded={reload} />
+          <section className="flex flex-col gap-3">
+            <h3 className="text-sm font-medium">Websites</h3>
+            <div>
+              {loading && !data ? (
+                <ListSkeleton />
+              ) : error ? (
+                <p className="text-muted-foreground text-sm">{error}</p>
+              ) : logins.length === 0 ? (
+                <p className="text-muted-foreground text-sm">No logins yet.</p>
+              ) : (
+                <ul className="flex flex-col divide-y">
+                  {logins.map((l) => (
+                    <LoginRow key={l.id} login={l} onRemoved={reload} />
+                  ))}
+                </ul>
+              )}
+            </div>
+            <AddLogin onAdded={reload} />
+          </section>
+          <section className="flex flex-col gap-3">
+            <h3 className="text-sm font-medium">Tools</h3>
+            <ToolLogins open={open} />
+          </section>
         </div>
       </div>
     </SidePanel>

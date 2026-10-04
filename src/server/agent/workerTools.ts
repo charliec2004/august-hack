@@ -11,6 +11,8 @@ import { calendarFreeBusy, executorRead } from "@/server/providers/executor";
 import { browserPrepareCommit, browserRead } from "@/server/providers/kernel";
 import { mailPrepareSend, mailReadThread } from "@/server/providers/agentmail";
 import { prepareEnvironmentChange, getActiveEnvironment } from "@/server/computers/environment";
+import { environmentView } from "@/server/computers/environmentView";
+import { listToolCredentials } from "@/server/credentials/store";
 import {
   acquireComputer,
   prepareComputerExternal,
@@ -401,12 +403,15 @@ export function workerTools(ctx: WorkerToolContext) {
         return putArtifactOnComputer({ lease: lease.data, artifactId, path });
       },
     });
-    tools.computer_get_file = createTool({
-      id: "computer_get_file",
+    tools.computer_save_file = createTool({
+      id: "computer_save_file",
       description:
-        "Save a file from your computer as an artifact (artifactId + sha256), e.g. to attach it in the browser with browser_upload.",
-      inputSchema: z.object({ path: z.string().min(2).describe("Absolute path on the computer") }),
-      execute: async ({ path }) => {
+        "Save a file from your computer to the user's Files (artifactId + sha256) so it outlives this computer: results the user would want later, or a file to attach in the browser with browser_upload. Everything not saved is scratch and disappears when the computer is released.",
+      inputSchema: z.object({
+        path: z.string().min(2).describe("Absolute path on the computer"),
+        filename: z.string().min(1).max(128).optional().describe("Name to save it under; defaults to the file's name"),
+      }),
+      execute: async ({ path, filename }) => {
         budget();
         const lease = await acquireComputer({
           userId: ctx.userId,
@@ -414,17 +419,40 @@ export function workerTools(ctx: WorkerToolContext) {
           workerSessionId: ctx.workerSessionId,
         });
         if (lease.status !== "succeeded" || !lease.data) return lease;
-        return publishArtifact({ lease: lease.data, path });
+        return publishArtifact({ lease: lease.data, path, filename });
       },
     });
     tools.computer_environment = createTool({
       id: "computer_environment",
-      description: "List the persistent tools installed for the user's computers.",
+      description:
+        "Show the user's persistent tools (installed on every computer; login.configured says whether its login is set), what was installed by hand on this computer only, and suggestions.",
       inputSchema: z.object({}),
       execute: async () => {
         budget();
-        const env = await getActiveEnvironment(ctx.userId);
-        return { generation: env.generation, tools: env.manifest.tools };
+        return environmentView({ userId: ctx.userId, workerSessionId: ctx.workerSessionId });
+      },
+    });
+    tools.request_tool_login = createTool({
+      id: "request_tool_login",
+      description:
+        "Use when a persistent tool needs a login that isn't set (computer_environment shows login.configured: false, or the CLI says you're not signed in). Returns the blocker to report.",
+      inputSchema: z.object({ toolKey: z.string().min(1).max(64) }),
+      execute: async ({ toolKey }) => {
+        budget();
+        const [env, creds] = await Promise.all([getActiveEnvironment(ctx.userId), listToolCredentials(ctx.userId)]);
+        const tool = env.manifest.tools.find((t) => t.toolKey === toolKey);
+        if (!tool) return { ok: false, note: `${toolKey} is not one of the user's persistent tools.` };
+        if (!tool.auth) return { ok: false, note: `${toolKey} does not declare a login.` };
+        const name = toolKey.charAt(0).toUpperCase() + toolKey.slice(1);
+        const what = tool.auth.kind === "env" ? tool.auth.vars.join(", ") : "credentials file";
+        const blocker = creds.some((c) => c.toolKey === toolKey)
+          ? `My ${name} login didn't work — update it in Logins (${what}).`
+          : `I need your ${name} login (${what}) to use the ${name} CLI — add it in Logins.`;
+        return {
+          ok: true,
+          blocker,
+          instruction: `Call report now with status "blocked" and blocker exactly: ${blocker}`,
+        };
       },
     });
     tools.computer_install_tool = createTool({
@@ -436,6 +464,20 @@ export function workerTools(ctx: WorkerToolContext) {
         packageName: z.string().describe("npm package name, or '-' for a non-npm tool installed by setup"),
         packageVersion: z.string().describe("Exact version (e.g. 1.2.3), or a pinned version label for setup tools"),
         setup: z.string().optional().describe("Shell command that installs a non-npm tool into $PREFIX/bin"),
+        auth: z
+          .union([
+            z.object({
+              kind: z.literal("env"),
+              vars: z.array(z.string()).min(1).max(16).describe("Env var names the CLI reads, e.g. NOTION_TOKEN"),
+            }),
+            z.object({
+              kind: z.literal("file"),
+              path: z.string().describe("Credentials file path relative to $HOME, e.g. .config/notion/credentials.json"),
+            }),
+          ])
+          .nullable()
+          .optional()
+          .describe("How the CLI signs in, if it needs a login. The user sets the value in Logins; never ask for it."),
       }),
       execute: async (tool) => {
         budget();

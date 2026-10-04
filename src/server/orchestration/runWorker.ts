@@ -17,6 +17,7 @@ import {
   startRun,
 } from "@/server/db/workers";
 import { runWorkerAgent } from "@/server/agent/worker";
+import { releaseComputersInBackground } from "@/server/computers/releaseOnTerminal";
 import type { CapabilityName, WorkerReport } from "@/server/types/domain";
 import { deliverUpdate } from "./deliver";
 
@@ -185,6 +186,7 @@ async function settle(userId: string, responsibilityId: string, report: WorkerRe
     await query(`update wakeups set status = 'cancelled' where responsibility_id = $1 and status = 'pending'`, [
       responsibilityId,
     ]);
+    releaseComputersInBackground(userId, responsibilityId);
     await deliverUpdate({ userId, responsibilityId, kind: "completed", report });
     return "completed";
   }
@@ -208,6 +210,7 @@ async function settle(userId: string, responsibilityId: string, report: WorkerRe
     await tx((c) =>
       transition(c, { userId, responsibilityId, to: "failed", eventText: "Couldn't finish", nextWakeAt: null }),
     );
+    releaseComputersInBackground(userId, responsibilityId);
     await deliverUpdate({ userId, responsibilityId, kind: "failed", report });
     return "failed";
   }

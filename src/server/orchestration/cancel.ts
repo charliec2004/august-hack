@@ -1,5 +1,6 @@
 import "server-only";
 
+import { releaseComputersInBackground } from "@/server/computers/releaseOnTerminal";
 import { tx } from "@/server/db/client";
 import { transition } from "@/server/db/responsibilities";
 import { cancelPendingWakes } from "@/server/db/wakeups";
@@ -22,5 +23,6 @@ export async function cancelResponsibility(userId: string, responsibilityId: str
       detail: { reason },
     });
   });
+  if (updated) releaseComputersInBackground(userId, responsibilityId);
   return Boolean(updated);
 }

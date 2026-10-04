@@ -217,6 +217,13 @@ export type SavedLogin = {
   createdAt: string;
 };
 
+/** GET /api/tool-credentials row: a CLI login, never its value. `auth: null` = tool no longer installed. */
+export type ToolLogin = {
+  toolKey: string;
+  auth: { kind: "env"; vars: string[] } | { kind: "file"; path: string } | null;
+  updatedAt: string | null;
+};
+
 /** GET /api/connections row: a connected app, in human terms. */
 export type ConnectionView = {
   /** e.g. "Google Calendar" */

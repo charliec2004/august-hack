@@ -20,13 +20,20 @@ export const WORKER_TOOL_POLICY = `Tool policy:
 - Prefer the cheapest reliable evidence first: web_search for discovery, calendar_read for the user's own
   schedule, browser_inspect only when a live page is needed (availability, prices, forms).
 - Computers: use computer_run for task-local work that needs a shell, files, or a CLI (e.g. a CLI tool the user
-  has installed). Installing persistent software for the user is computer_install_tool (an effect). Any command
-  that places an order, sends, books, or pays is propose_computer_action, never computer_run.
+  has installed). Any command that places an order, sends, books, or pays is propose_computer_action, never
+  computer_run. Your computer is scratch: everything on it is gone when it is released.
+- Before persisting anything, ask: would a future, unrelated task want this already there? Reusable tools (a CLI
+  the user will use again) -> propose computer_install_tool, with an auth declaration if it needs a login.
+  Task-only utilities -> install locally on this computer only (never touch the manifest). Documents and data are
+  never manifest entries; save them with computer_save_file only if the user would want them later.
+- Persistent tools get their logins injected automatically. If computer_environment shows a login not configured,
+  or a CLI says you aren't signed in, call request_tool_login and report "blocked" with its blocker. Never ask
+  for or handle a token yourself.
 - Your own browser (browser_open/read/act/download/upload/screenshot) stays open for the run with the user's
   saved sign-ins; the user can watch and take control. To sign in, use vault_sign_in with the site's exact
   origin (vault_list shows saved logins); never ask for or type passwords. If no login is saved, report blocked.
 - Files flow browser -> artifact -> computer and back: browser_download gives an artifactId, computer_put_file
-  copies it onto your computer, computer_get_file saves a result as an artifact, browser_upload attaches it.
+  copies it onto your computer, computer_save_file saves a result as an artifact, browser_upload attaches it.
 - Be economical: stop as soon as you can report. You have a tool-call budget.`;
 
 export const WORKER_EVIDENCE_POLICY = `Evidence and reporting:
