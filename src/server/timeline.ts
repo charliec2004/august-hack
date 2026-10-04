@@ -23,6 +23,48 @@ type Entry =
 
 type Part = UIMessage["parts"][number];
 
+/** Lines the conversation already says better (its messages and cards). */
+const REDUNDANT = [
+  /^took on/i,
+  /^working on it$/i,
+  /^checking again$/i,
+  /^will check again/i,
+  /^waiting for your ok/i,
+  /^needs your approval/i,
+  /^you approved/i,
+  /^you said not now/i,
+  /^emailed /i,
+  /^confirmed it went through/i,
+  /^that didn't go through/i,
+  /^checking whether that went through/i,
+  /^done$/i,
+];
+const BROWSER_STEP = /^(?:opening|opened|checked|browsed|reading|read) (.+)$/i;
+
+/**
+ * Condense a run of activity into the steps worth seeing: drop lines that
+ * duplicate messages/cards, fold each site's open/check/browse into one
+ * "Visited site", and keep each distinct step once.
+ */
+function condense(items: TimelineActivityItem[]): TimelineActivityItem[] {
+  const out: TimelineActivityItem[] = [];
+  const seen = new Map<string, number>();
+  for (const item of items) {
+    if (REDUNDANT.some((r) => r.test(item.text))) continue;
+    const site = item.text.match(BROWSER_STEP)?.[1];
+    const text = site ? `Visited ${site.replace(/^www\./, "")}` : item.text;
+    const at = seen.get(text);
+    if (at !== undefined) {
+      // Keep the latest occurrence's session so a live browser stays watchable.
+      out[at] = { ...out[at], browserSessionId: item.browserSessionId ?? out[at].browserSessionId };
+      continue;
+    }
+    seen.set(text, out.length);
+    out.push({ ...item, text, responsibilityTitle: null });
+  }
+  return out;
+}
+
 /**
  * Parts the UI renders. Stored `parts` win whenever present (text plus the
  * generative UI tool/data parts); `content` is only a fallback for rows without
@@ -81,8 +123,12 @@ export async function buildTimeline(userId: string): Promise<UIMessage[]> {
   const out: UIMessage[] = [];
   let run: TimelineActivityItem[] = [];
   const flush = () => {
-    if (run.length === 0) return;
-    const data: TimelineActivityData = { items: run };
+    const items = condense(run);
+    if (items.length === 0) {
+      run = [];
+      return;
+    }
+    const data: TimelineActivityData = { items };
     out.push({
       id: `activity-${run[0].id}`,
       role: "assistant",

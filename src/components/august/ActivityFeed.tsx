@@ -8,36 +8,51 @@ import { formatWhen } from "./format";
 import { liveBrowserForLine, useShellActions } from "./shellActions";
 import { useAugust } from "./useAugustState";
 
-const COLLAPSED_COUNT = 4;
-
 type Line = Pick<TimelineActivityItem, "id" | "text" | "at" | "responsibilityId" | "browserSessionId"> & {
   responsibilityTitle?: string | null;
 };
 
+/** "Searched the web · Visited a.com, b.com" — one quiet line for a run of steps. */
+function summarize(items: Line[]): string {
+  const sites = items.filter((i) => i.text.startsWith("Visited ")).map((i) => i.text.slice(8));
+  const other = items.filter((i) => !i.text.startsWith("Visited ")).map((i) => i.text);
+  const visited =
+    sites.length === 0
+      ? []
+      : [`Visited ${sites.slice(0, 2).join(", ")}${sites.length > 2 ? ` and ${sites.length - 2} more` : ""}`];
+  return [...other, ...visited].join(" · ");
+}
+
 /**
- * A run of activity lines inline in the conversation, where they happened.
- * Calm and small; long runs collapse to the newest few.
+ * A run of August's steps inline in the conversation, where they happened.
+ * One summary line by default; expands to the individual steps.
  */
 export function ActivityLines({ items }: { items: TimelineActivityItem[] }) {
   const [expanded, setExpanded] = useState(false);
+  const { state } = useAugust();
+  const { watch } = useShellActions();
   if (items.length === 0) return null;
-  const hidden = Math.max(0, items.length - COLLAPSED_COUNT);
-  const visible = expanded ? items : items.slice(-COLLAPSED_COUNT);
+  const live = items.map((i) => liveBrowserForLine(state, i)).find(Boolean) ?? null;
 
   return (
-    <div data-slot="august-activity" className="my-1">
-      {hidden > 0 && (
+    <div data-slot="august-activity" className="my-1 text-[13px] leading-5">
+      <div className="flex items-baseline gap-1.5">
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
-          className="text-muted-foreground/80 hover:text-foreground mb-0.5 inline-flex items-center gap-1 text-xs transition-colors"
+          className="text-muted-foreground hover:text-foreground inline-flex min-w-0 items-baseline gap-1 text-left transition-colors"
         >
-          {expanded ? "Show less" : `${hidden} earlier ${hidden === 1 ? "step" : "steps"}`}
-          <ChevronDownIcon className={cn("size-3.5 transition-transform", expanded && "rotate-180")} />
+          <span className="truncate">{summarize(items)}</span>
+          <ChevronDownIcon className={cn("size-3.5 shrink-0 translate-y-[2px] transition-transform", expanded && "rotate-180")} />
         </button>
+        {live && <WatchButton browser={live} onWatch={watch} />}
+      </div>
+      {expanded && (
+        <div className="mt-1 border-l pl-3">
+          <ActivityList items={items} />
+        </div>
       )}
-      <ActivityList items={visible} showTitles />
     </div>
   );
 }
