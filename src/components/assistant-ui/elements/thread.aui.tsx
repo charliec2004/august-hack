@@ -485,6 +485,10 @@ const AssistantMessage: FC = () => {
     TaskGroup: TaskGroupComponent,
   } = useContext(ThreadComponentsContext);
   const groupBy = TaskGroupComponent ? taskAwareGroupBy : messageGroupBy;
+  // Activity lines and cards alone get no copy/refresh bar.
+  const hasText = useAuiState((s) =>
+    s.message.content.some((p) => p.type === "text" && p.text.trim() !== ""),
+  );
 
   const ACTION_BAR_PT = "pt-1.5";
   // Keep the action bar inside the contained root's paint box, then cancel its reserved space in flow.
@@ -585,7 +589,7 @@ const AssistantMessage: FC = () => {
         data-slot="aui_assistant-message-footer"
         className={cn("ms-2 flex items-center", ACTION_BAR_HEIGHT)}
       >
-        <AssistantActionBar />
+        {hasText && <AssistantActionBar />}
       </div>
     </MessagePrimitive.Root>
   );

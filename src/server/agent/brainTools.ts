@@ -13,6 +13,7 @@ import {
 import { trace } from "@/server/db/traces";
 import { cancelResponsibility } from "@/server/orchestration/cancel";
 import { kickResponsibility } from "@/server/orchestration/wakes";
+import { uiTools } from "./uiTools";
 
 export type BrainContext = {
   userId: string;
@@ -21,7 +22,10 @@ export type BrainContext = {
   sourceMessageId: string;
 };
 
-/** Brain Core's narrow internal tools (spec 6). No provider access here. */
+/**
+ * Brain Core's narrow internal tools (spec 6) plus generative UI tools. No
+ * provider access here.
+ */
 export function brainTools(ctx: BrainContext) {
   const responsibility_create = createTool({
     id: "responsibility_create",
@@ -131,5 +135,11 @@ export function brainTools(ctx: BrainContext) {
     }),
   });
 
-  return { responsibility_create, responsibility_update, responsibility_list, responsibility_cancel };
+  return {
+    responsibility_create,
+    responsibility_update,
+    responsibility_list,
+    responsibility_cancel,
+    ...uiTools(),
+  };
 }

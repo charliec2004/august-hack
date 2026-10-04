@@ -11,6 +11,7 @@ import { gatewayProviderOptions, modelConfigured } from "@/server/agent/model";
 import { currentUser } from "@/server/auth/currentUser";
 import { ensurePrimaryThread, insertMessage, recentMessages } from "@/server/db/messages";
 import { trace } from "@/server/db/traces";
+import { describeUi, isGenUiTool, stripHistoryLines } from "@/lib/genui";
 
 export const maxDuration = 300;
 
@@ -31,6 +32,38 @@ function staticReply(text: string) {
     },
   });
   return createUIMessageStreamResponse({ stream });
+}
+
+type BrainStream = Awaited<ReturnType<Awaited<ReturnType<typeof brainAgent>>["stream"]>>;
+
+/**
+ * What the turn said and showed, for the conversation of record. Generative UI
+ * tool calls are kept as AI SDK tool parts so the cards survive a reload; other
+ * tool calls are machinery and are dropped. `content` (what the model's history
+ * sees) gets one plain line per component shown.
+ */
+async function turnRecord(stream: BrainStream): Promise<{ content: string; parts: unknown[] }> {
+  const parts: unknown[] = [];
+  const shown: string[] = [];
+  for (const step of await stream.steps) {
+    // The model may imitate history-only lines; they never reach the UI.
+    const text = stripHistoryLines(step.text);
+    if (text) parts.push({ type: "text", text });
+    for (const call of step.toolCalls) {
+      const { toolCallId, toolName, args } = call.payload;
+      if (!isGenUiTool(toolName)) continue;
+      const input = { ...(args as Record<string, unknown>) };
+      delete input.__mastraMetadata;
+      parts.push({ type: `tool-${toolName}`, toolCallId, state: "output-available", input, output: { shown: true } });
+      const key = { show_options: "options", ask_user: "question", show_comparison: "comparison", show_image: "image" }[toolName];
+      shown.push(describeUi({ [key]: input }));
+    }
+  }
+  const text = parts
+    .filter((p): p is { type: "text"; text: string } => (p as { type: string }).type === "text")
+    .map((p) => p.text)
+    .join("\n\n");
+  return { content: [text, ...shown].filter(Boolean).join("\n\n"), parts };
 }
 
 /** Authenticated streaming Brain Core turn (spec 9). */
@@ -74,9 +107,9 @@ export async function POST(req: Request) {
 
   after(async () => {
     try {
-      const out = (await stream.text).trim();
-      if (out) {
-        await insertMessage({ threadId, userId: user.id, role: "assistant", content: out });
+      const { content, parts } = await turnRecord(stream);
+      if (content) {
+        await insertMessage({ threadId, userId: user.id, role: "assistant", content, parts });
         await trace({ userId: user.id, kind: "brain.delivered", detail: { deliveryKind: "turn" } });
       }
     } catch (e) {

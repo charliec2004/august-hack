@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
-import { useAuiState, type ToolCallMessagePartComponent } from "@assistant-ui/react";
+import {
+  useAuiState,
+  type ToolCallMessagePartComponent,
+} from "@assistant-ui/react";
 import { ChevronRightIcon, XIcon } from "lucide-react";
 import {
   Thread,
@@ -15,20 +18,21 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import type { ActivityItem } from "@/server/types/api";
-import { ActivityFeed } from "./ActivityFeed";
-import { ApprovalStack } from "./ApprovalCard";
+import type { LiveBrowser } from "@/server/types/api";
 import { BrowserLiveView, type LiveViewTarget } from "./BrowserLiveView";
 import { DemoControls } from "./DemoControls";
 import { isFinished } from "./format";
 import { ResponsibilityDrawer } from "./ResponsibilityDrawer";
+import { AugustRenderers } from "./genui/registry";
 import { ResponsibilityRail } from "./ResponsibilityRail";
+import { ShellActionsContext, type ShellActions } from "./shellActions";
 import { useAugust, type Connection } from "./useAugustState";
 
 /**
- * One route: what August owns on the left, the conversation on the right,
- * approvals docked above the composer. Must render inside both
- * AssistantRuntimeProvider and AugustProvider.
+ * One route: what August owns on the left, one chronological conversation on
+ * the right (messages, activity lines, and approval cards where they
+ * happened). Must render inside both AssistantRuntimeProvider and
+ * AugustProvider.
  */
 export function AugustShell() {
   const { state, connection } = useAugust();
@@ -50,27 +54,39 @@ export function AugustShell() {
     setRailOpen(false);
     setDrawerId(id);
   }, []);
-  const watchResponsibility = useCallback((id: string) => {
-    setRailOpen(false);
-    setLiveTarget({ responsibilityId: id, activityId: null });
-  }, []);
-  const watchActivity = useCallback((item: ActivityItem) => {
-    setLiveTarget({
-      responsibilityId: item.responsibilityId,
-      activityId: item.id,
-    });
-  }, []);
+  // Live views open only for sessions that are live in the latest state.
+  const liveBrowsers = useMemo(() => state?.liveBrowsers ?? [], [state]);
+  const watch = useCallback(
+    (browser: LiveBrowser) => {
+      if (!liveBrowsers.some((b) => b.sessionId === browser.sessionId)) return;
+      setRailOpen(false);
+      setLiveTarget({
+        sessionId: browser.sessionId,
+        responsibilityId: browser.responsibilityId,
+      });
+    },
+    [liveBrowsers],
+  );
+  const watchResponsibility = useCallback(
+    (id: string) => {
+      const browser = liveBrowsers.find((b) => b.responsibilityId === id);
+      if (browser) watch(browser);
+    },
+    [liveBrowsers, watch],
+  );
+  const actions = useMemo<ShellActions>(
+    () => ({ watch, openResponsibility: openDrawer }),
+    [watch, openDrawer],
+  );
 
-  // Resolve the live view from the freshest state so it closes out when done.
+  // Resolve the URL from the freshest state so the view closes out when it ends.
+  const liveUrl = liveTarget
+    ? (liveBrowsers.find((b) => b.sessionId === liveTarget.sessionId)
+        ?.liveViewUrl ?? null)
+    : null;
   const liveResponsibility = liveTarget?.responsibilityId
     ? responsibilities.find((r) => r.id === liveTarget.responsibilityId)
     : undefined;
-  const liveActivity = liveTarget?.activityId
-    ? state?.activity.find((a) => a.id === liveTarget.activityId)
-    : undefined;
-  const liveUrl = liveTarget
-    ? (liveResponsibility?.liveViewUrl ?? liveActivity?.liveViewUrl ?? null)
-    : null;
 
   const threadComponents = useMemo<ThreadComponents>(
     () => ({
@@ -79,15 +95,8 @@ export function AugustShell() {
       ToolGroup: PlainGroup,
       ReasoningGroup: HiddenGroup,
       composerPlaceholder: "Hand August something to take care of…",
-      AfterMessages: () => (
-        <ActivitySlot
-          onWatch={watchActivity}
-          onOpenResponsibility={openDrawer}
-        />
-      ),
-      BeforeComposer: ApprovalSlot,
     }),
-    [watchActivity, openDrawer],
+    [],
   );
 
   const rail = (
@@ -106,75 +115,81 @@ export function AugustShell() {
   );
 
   return (
-    <div className="bg-background flex h-dvh flex-col">
-      <RefetchAfterChat />
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4 md:px-5">
-        <h1 className="font-heading text-[1.35rem] leading-none font-medium tracking-tight">
-          August
-        </h1>
-        <ConnectionIndicator connection={connection} />
-        <div className="flex-1" />
-        <Button
-          variant="ghost"
-          size="sm"
-          className="md:hidden"
-          onClick={() => setRailOpen(true)}
-        >
-          {needsYouCount > 0 && (
-            <span className="bg-attention size-1.5 rounded-full" aria-hidden />
-          )}
-          August owns {openCount} {openCount === 1 ? "thing" : "things"}
-          <ChevronRightIcon />
-        </Button>
-      </header>
+    <ShellActionsContext.Provider value={actions}>
+      <div className="bg-background flex h-dvh flex-col">
+        <AugustRenderers />
+        <RefetchAfterChat />
+        <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4 md:px-5">
+          <h1 className="font-heading text-[1.35rem] leading-none font-medium tracking-tight">
+            August
+          </h1>
+          <ConnectionIndicator connection={connection} />
+          <div className="flex-1" />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="md:hidden"
+            onClick={() => setRailOpen(true)}
+          >
+            {needsYouCount > 0 && (
+              <span
+                className="bg-attention size-1.5 rounded-full"
+                aria-hidden
+              />
+            )}
+            August owns {openCount} {openCount === 1 ? "thing" : "things"}
+            <ChevronRightIcon />
+          </Button>
+        </header>
 
-      <div className="flex min-h-0 flex-1">
-        <aside className="bg-sidebar hidden w-[280px] shrink-0 flex-col border-r md:flex">
-          {rail}
-        </aside>
-        <main className="min-w-0 flex-1">
-          <Thread components={threadComponents} />
-        </main>
-      </div>
-
-      {/* Mobile rail */}
-      <DialogPrimitive.Root open={railOpen} onOpenChange={setRailOpen}>
-        <DialogPrimitive.Portal>
-          <DialogPrimitive.Backdrop className="data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0 fixed inset-0 z-40 bg-black/20 duration-200" />
-          <DialogPrimitive.Popup className="bg-sidebar data-open:animate-in data-open:slide-in-from-left data-closed:animate-out data-closed:slide-out-to-left fixed inset-y-0 left-0 z-40 flex w-[86vw] max-w-[320px] flex-col border-r shadow-xl duration-200 outline-none">
-            <DialogPrimitive.Title className="sr-only">
-              What August owns
-            </DialogPrimitive.Title>
-            <DialogPrimitive.Close
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="absolute top-3 right-3 z-10"
-                />
-              }
-            >
-              <XIcon />
-              <span className="sr-only">Close</span>
-            </DialogPrimitive.Close>
+        <div className="flex min-h-0 flex-1">
+          <aside className="bg-sidebar hidden w-[280px] shrink-0 flex-col border-r md:flex">
             {rail}
-          </DialogPrimitive.Popup>
-        </DialogPrimitive.Portal>
-      </DialogPrimitive.Root>
+          </aside>
+          <main className="min-w-0 flex-1">
+            <Thread components={threadComponents} />
+          </main>
+        </div>
 
-      <ResponsibilityDrawer
-        responsibilityId={drawerId}
-        onClose={() => setDrawerId(null)}
-        onWatch={watchResponsibility}
-      />
+        {/* Mobile rail */}
+        <DialogPrimitive.Root open={railOpen} onOpenChange={setRailOpen}>
+          <DialogPrimitive.Portal>
+            <DialogPrimitive.Backdrop className="data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0 fixed inset-0 z-40 bg-black/20 duration-200" />
+            <DialogPrimitive.Popup className="bg-sidebar data-open:animate-in data-open:slide-in-from-left data-closed:animate-out data-closed:slide-out-to-left fixed inset-y-0 left-0 z-40 flex w-[86vw] max-w-[320px] flex-col border-r shadow-xl duration-200 outline-none">
+              <DialogPrimitive.Title className="sr-only">
+                What August owns
+              </DialogPrimitive.Title>
+              <DialogPrimitive.Close
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="absolute top-3 right-3 z-10"
+                  />
+                }
+              >
+                <XIcon />
+                <span className="sr-only">Close</span>
+              </DialogPrimitive.Close>
+              {rail}
+            </DialogPrimitive.Popup>
+          </DialogPrimitive.Portal>
+        </DialogPrimitive.Root>
 
-      <BrowserLiveView
-        open={liveTarget !== null}
-        title={liveResponsibility?.title ?? "August at work"}
-        url={liveUrl}
-        onOpenChange={(open) => !open && setLiveTarget(null)}
-      />
-    </div>
+        <ResponsibilityDrawer
+          responsibilityId={drawerId}
+          onClose={() => setDrawerId(null)}
+          onWatch={watchResponsibility}
+        />
+
+        <BrowserLiveView
+          open={liveTarget !== null}
+          title={liveResponsibility?.title ?? "August at work"}
+          url={liveUrl}
+          onOpenChange={(open) => !open && setLiveTarget(null)}
+        />
+      </div>
+    </ShellActionsContext.Provider>
   );
 }
 
@@ -226,30 +241,6 @@ function RefetchAfterChat() {
     was.current = running;
   }, [running, refresh]);
   return null;
-}
-
-function ApprovalSlot() {
-  const { state } = useAugust();
-  return <ApprovalStack approvals={state?.approvals ?? []} />;
-}
-
-function ActivitySlot({
-  onWatch,
-  onOpenResponsibility,
-}: {
-  onWatch: (item: ActivityItem) => void;
-  onOpenResponsibility: (id: string) => void;
-}) {
-  const { state } = useAugust();
-  if (!state) return null;
-  return (
-    <ActivityFeed
-      activity={state.activity}
-      responsibilities={state.responsibilities}
-      onWatch={onWatch}
-      onOpenResponsibility={onOpenResponsibility}
-    />
-  );
 }
 
 function Welcome() {

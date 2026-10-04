@@ -54,6 +54,36 @@ export async function pendingApprovals(userId: string) {
   return rows;
 }
 
+export type UserFacingEffectRow = EffectRow & {
+  responsibility_title: string;
+  decided_at: Date | null;
+  settled_at: Date | null;
+};
+
+/**
+ * Every recent effect the user was asked about (pending, or decided via an
+ * approval record), newest first, for persistent approval cards. A pending card
+ * whose responsibility has closed is dropped: it can no longer be acted on.
+ */
+export async function recentUserFacingEffects(userId: string, limit = 50) {
+  const { rows } = await query<UserFacingEffectRow>(
+    `select e.*, r.title as responsibility_title,
+            (select max(a.created_at) from approvals a where a.effect_proposal_id = e.id) as decided_at,
+            (select max(x.created_at) from effect_receipts x where x.effect_proposal_id = e.id) as settled_at
+       from effect_proposals e join responsibilities r on r.id = e.responsibility_id
+      where e.user_id = $1
+        and e.created_at > now() - interval '48 hours'
+        and (
+          (e.status = 'waiting_approval' and r.status not in ('completed','failed','cancelled'))
+          or exists (select 1 from approvals a where a.effect_proposal_id = e.id)
+        )
+      order by e.created_at desc
+      limit $2`,
+    [userId, limit],
+  );
+  return rows;
+}
+
 export async function effectsForResponsibility(userId: string, responsibilityId: string) {
   const { rows } = await query<EffectRow>(
     `select * from effect_proposals where user_id = $1 and responsibility_id = $2

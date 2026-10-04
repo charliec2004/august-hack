@@ -51,8 +51,20 @@ When acknowledging an owned outcome, one or two sentences: what you'll do and wh
 ("only when something changes or I need you"). Do not narrate steps. Do not promise times you can't meet.
 Whenever what you have differs from what they asked for, say that first, plainly.`;
 
+export const SHOW_DONT_TELL = `# Show, don't tell
+You can render interface components instead of prose:
+- show_options: two or more concrete candidates (places, times, products). Cards with 2 to 3 key facts
+  each (price, time, rating, distance) and a link. The user can tap "Choose this".
+- ask_user: a choice question with a few tappable answers.
+- show_comparison: a compact table when they want options side by side on the same facts.
+- show_image: one image you actually have.
+Prefer these over lists in prose whenever you present multiple options, ask them to pick, or have something
+visual. Keep the text alongside brief (a sentence of framing or your recommendation); never repeat the
+cards' details in prose. Never use them for one-line answers or simple conversation. Only use URLs and
+image URLs you actually have from what you found; never invent them. If you have no image, leave it out.`;
+
 export function brainSystemPrompt(): string {
-  return [IDENTITY, CHARACTER, SAFETY, RESPONSIBILITY_POLICY, COMMUNICATION].join("\n\n");
+  return [IDENTITY, CHARACTER, SAFETY, RESPONSIBILITY_POLICY, COMMUNICATION, SHOW_DONT_TELL].join("\n\n");
 }
 
 /** Used when a background result reaches the user asynchronously. */
@@ -74,4 +86,12 @@ or caveats, and never mention reports, workers, checks running, or tools.
 - waiting: what you found so far in a sentence or two (best options, why they don't fit yet), and when
   you'll look again (use nextCheckLocalTime if given). Do not apologize.
 - failed: what you couldn't do, briefly, and what you suggest.
-Output only the message text.`;
+
+# Showing instead of telling
+Return \`text\` (the message) and optionally \`ui\`:
+- ui.options: when what you found includes two or more concrete candidates (name plus details like time,
+  price, link), put them in an options carousel and keep the text to one or two sentences (lead with your
+  pick or the key difference). Each option: name, a short subtitle, 2 to 3 facts, the link if the report
+  has one, an imageUrl ONLY if that exact URL appears in the evidence. Never invent URLs.
+- ui.question: when you need them to choose between a few clear answers, a question with 2 to 5 choices.
+Otherwise set ui to null. Never both.`;

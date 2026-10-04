@@ -1,21 +1,13 @@
 import { currentUser } from "@/server/auth/currentUser";
-import { ensurePrimaryThread, recentMessages } from "@/server/db/messages";
+import { buildTimeline } from "@/server/timeline";
 
 export const dynamic = "force-dynamic";
 
-/** Conversation of record as AI SDK UIMessages (for assistant-ui initial/sync). */
+/**
+ * The conversation of record merged with activity lines and approval cards,
+ * in time order, as AI SDK UIMessages (assistant-ui initial load and sync).
+ */
 export async function GET() {
   const user = await currentUser();
-  const threadId = await ensurePrimaryThread(user.id);
-  const rows = await recentMessages(user.id, threadId, 60);
-  return Response.json(
-    rows
-      .filter((m) => m.role !== "system")
-      .map((m) => ({
-        id: m.id,
-        role: m.role,
-        parts: [{ type: "text", text: m.content }],
-        metadata: { createdAt: m.created_at.toISOString(), responsibilityId: m.responsibility_id },
-      })),
-  );
+  return Response.json(await buildTimeline(user.id));
 }

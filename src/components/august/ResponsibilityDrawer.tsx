@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import {
-  ArrowUpRightIcon,
   LoaderCircleIcon,
   MonitorPlayIcon,
   XIcon,
@@ -17,9 +16,9 @@ import type {
 } from "@/server/types/api";
 import { ActivityList } from "./ActivityFeed";
 import { WakeButton } from "./DemoControls";
+import { EvidenceList } from "./EvidenceList";
 import {
   formatWhen,
-  hostOf,
   humanizeKey,
   humanizeValue,
   isFinished,
@@ -267,37 +266,7 @@ function DrawerBody({
 
           {detail && detail.evidence.length > 0 && (
             <Section title="What August found">
-              <ul className="flex flex-col gap-2">
-                {detail.evidence.map((ev) => (
-                  <li
-                    key={ev.id}
-                    className="rounded-xl border px-3.5 py-2.5 text-sm"
-                  >
-                    {ev.url ? (
-                      <a
-                        href={ev.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="group/ev inline-flex items-start gap-1 font-medium hover:underline"
-                      >
-                        {ev.title}
-                        <ArrowUpRightIcon className="text-muted-foreground mt-0.5 size-3.5 shrink-0" />
-                      </a>
-                    ) : (
-                      <p className="font-medium">{ev.title}</p>
-                    )}
-                    {ev.summary && (
-                      <p className="text-foreground/80 mt-0.5 leading-relaxed">
-                        {ev.summary}
-                      </p>
-                    )}
-                    <p className="text-muted-foreground mt-1 text-xs">
-                      {ev.url ? `${hostOf(ev.url)} · ` : ""}
-                      {formatWhen(ev.observedAt)}
-                    </p>
-                  </li>
-                ))}
-              </ul>
+              <EvidenceList evidence={detail.evidence} />
             </Section>
           )}
         </div>

@@ -25,7 +25,7 @@ export type ResponsibilityView = {
   waitingOn: string | null;
   /** True while a Worker run is actively executing. */
   active: boolean;
-  /** Short-lived Kernel live-view URL while a browser session is open. */
+  /** Live-view URL while a browser session is live (from AugustState.liveBrowsers). */
   liveViewUrl: string | null;
   updatedAt: string;
 };
@@ -58,6 +58,9 @@ export type ResponsibilityDetail = ResponsibilityView & {
 /** One labeled material field on an approval card. */
 export type ApprovalField = { label: string; value: string };
 
+/** Where a user-facing effect stands, derived from effect_proposals.status. */
+export type ApprovalState = "pending" | "sending" | "sent" | "declined" | "failed" | "uncertain";
+
 export type ApprovalView = {
   effectId: string;
   responsibilityId: string;
@@ -76,6 +79,11 @@ export type ApprovalView = {
   /** Reviewer's question when it returned needs_confirmation. */
   question: string | null;
   createdAt: string;
+  state: ApprovalState;
+  /** When the user approved or declined, if they have. */
+  decidedAt: string | null;
+  /** When the outcome was recorded (receipt), if it has been. */
+  settledAt: string | null;
 };
 
 export type ActivityItem = {
@@ -84,19 +92,49 @@ export type ActivityItem = {
   responsibilityId: string | null;
   /** Safe, evidence-oriented sentence, e.g. "Searched the web". */
   text: string;
-  liveViewUrl: string | null;
+  /** Browser session this line happened in, if any. Watchable only while live. */
+  browserSessionId: string | null;
 };
+
+/** A browser session that is live right now. The only source of live-view links. */
+export type LiveBrowser = {
+  sessionId: string;
+  responsibilityId: string | null;
+  liveViewUrl: string;
+};
+
+/* Timeline parts (GET /api/messages). Rendered by makeAssistantDataUI. -------- */
+
+export type TimelineActivityItem = {
+  id: string;
+  text: string;
+  at: string;
+  responsibilityId: string | null;
+  responsibilityTitle: string | null;
+  browserSessionId: string | null;
+};
+
+/** `data-activity`: a run of consecutive activity lines. */
+export type TimelineActivityData = { items: TimelineActivityItem[] };
+
+/** `data-approval`: an approval card, resolved against AugustState.approvals. */
+export type TimelineApprovalData = { effectId: string };
 
 /** GET /api/state: one poll endpoint for the whole shell. */
 export type AugustState = {
   responsibilities: ResponsibilityView[];
+  /** Every recent user-facing effect (48h, newest 50), pending and resolved. */
   approvals: ApprovalView[];
   activity: ActivityItem[];
+  /** Browser sessions that are live right now. */
+  liveBrowsers: LiveBrowser[];
   /**
-   * Id of the newest persisted conversation message. When it changes and the
-   * thread isn't streaming, the UI reloads GET /api/messages (updates August
-   * delivered asynchronously, e.g. after a scheduled check or webhook).
+   * Changes whenever anything in the conversation timeline changes (a message,
+   * an activity line, or an effect's state). The UI reloads GET /api/messages
+   * when it changes and nothing is streaming.
    */
+  timelineVersion: string;
+  /** Id of the newest persisted conversation message. */
   latestMessageId: string | null;
   /** Development/demo controls enabled (AUGUST_ENV !== "production"). */
   demoControls: boolean;

@@ -1,18 +1,21 @@
 "use client";
 
+import { useEffect } from "react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { ExternalLinkIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export type LiveViewTarget = {
+  sessionId: string;
   responsibilityId: string | null;
-  activityId: string | null;
 };
+
+const CLOSE_AFTER_END_MS = 2500;
 
 /**
  * Modal that shows the live view of a page August is working in. `url` is
- * resolved from the latest polled state, so when the work ends the frame is
- * replaced with a quiet note instead of a dead view.
+ * resolved from the latest polled state (live sessions only), so when the
+ * session ends the frame is replaced with a quiet note and the modal closes.
  */
 export function BrowserLiveView({
   open,
@@ -25,6 +28,12 @@ export function BrowserLiveView({
   url: string | null;
   onOpenChange: (open: boolean) => void;
 }) {
+  useEffect(() => {
+    if (!open || url) return;
+    const timer = setTimeout(() => onOpenChange(false), CLOSE_AFTER_END_MS);
+    return () => clearTimeout(timer);
+  }, [open, url, onOpenChange]);
+
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
@@ -48,7 +57,7 @@ export function BrowserLiveView({
                 {title}
               </DialogPrimitive.Title>
               <DialogPrimitive.Description className="text-muted-foreground text-xs">
-                {url ? "Live, as August works" : "Finished"}
+                {url ? "Live, as August works" : "Ended"}
               </DialogPrimitive.Description>
             </div>
             {url && (
@@ -83,7 +92,7 @@ export function BrowserLiveView({
               />
             ) : (
               <div className="text-muted-foreground absolute inset-0 flex items-center justify-center text-sm">
-                August has finished on this page.
+                This browser session has ended.
               </div>
             )}
           </div>

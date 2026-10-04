@@ -1,7 +1,8 @@
 import "server-only";
 
+import { listActivity, timelineVersion } from "@/server/activity";
 import { query } from "@/server/db/client";
-import { pendingApprovals } from "@/server/db/effects";
+import { recentUserFacingEffects } from "@/server/db/effects";
 import { listEvidence } from "@/server/db/evidence";
 import {
   getResponsibility,
@@ -11,9 +12,10 @@ import {
 } from "@/server/db/responsibilities";
 import { activeRunsFor } from "@/server/db/workers";
 import { toApprovalView } from "@/server/effects/display";
+import { liveBrowsersFor } from "@/server/liveBrowsers";
 import type {
-  ActivityItem,
   AugustState,
+  LiveBrowser,
   HumanStatus,
   ResponsibilityDetail,
   ResponsibilityView,
@@ -48,7 +50,7 @@ const SORT: Record<HumanStatus, number> = {
   "Couldn't finish": 4,
 };
 
-function toView(r: ResponsibilityRow, runs: Map<string, string | null>): ResponsibilityView {
+function toView(r: ResponsibilityRow, runs: Set<string>, live: LiveBrowser[]): ResponsibilityView {
   const active = runs.has(r.id);
   return {
     id: r.id,
@@ -58,48 +60,38 @@ function toView(r: ResponsibilityRow, runs: Map<string, string | null>): Respons
     nextWakeAt: r.next_wake_at ? r.next_wake_at.toISOString() : null,
     waitingOn: r.waiting_on?.startsWith("approval:") ? "your approval" : r.waiting_on,
     active,
-    liveViewUrl: runs.get(r.id) ?? null,
+    liveViewUrl: live.find((b) => b.responsibilityId === r.id)?.liveViewUrl ?? null,
     updatedAt: r.updated_at.toISOString(),
   };
 }
 
-async function runMap(userId: string) {
+async function activeSet(userId: string) {
   const runs = await activeRunsFor(userId);
-  const m = new Map<string, string | null>();
-  for (const run of runs) if (run.responsibility_id) m.set(run.responsibility_id, run.live_view_url);
-  return m;
+  return new Set(runs.flatMap((run) => (run.responsibility_id ? [run.responsibility_id] : [])));
 }
 
 export async function buildState(userId: string): Promise<AugustState> {
-  const [rows, runs, approvals, activity, latest] = await Promise.all([
+  const [rows, runs, live, effects, activity, latest, version] = await Promise.all([
     listResponsibilities(userId),
-    runMap(userId),
-    pendingApprovals(userId),
-    query<{ id: string; created_at: Date; responsibility_id: string | null; safe_detail: { text?: string; liveViewUrl?: string | null } }>(
-      `select id::text, created_at, responsibility_id, safe_detail from trace_events
-        where user_id = $1 and safe_detail ? 'text' and coalesce(safe_detail->>'text','') <> ''
-        order by created_at desc limit 40`,
-      [userId],
-    ),
+    activeSet(userId),
+    liveBrowsersFor(userId),
+    recentUserFacingEffects(userId),
+    listActivity(userId, { limit: 40 }),
     query<{ id: string }>(
       `select id from messages where user_id = $1 order by created_at desc limit 1`,
       [userId],
     ),
+    timelineVersion(userId),
   ]);
   const responsibilities = rows
-    .map((r) => toView(r, runs))
+    .map((r) => toView(r, runs, live))
     .sort((a, b) => SORT[a.humanStatus] - SORT[b.humanStatus] || b.updatedAt.localeCompare(a.updatedAt));
-  const items: ActivityItem[] = activity.rows.reverse().map((t) => ({
-    id: t.id,
-    at: t.created_at.toISOString(),
-    responsibilityId: t.responsibility_id,
-    text: t.safe_detail.text ?? "",
-    liveViewUrl: t.safe_detail.liveViewUrl ?? null,
-  }));
   return {
     responsibilities,
-    approvals: approvals.map(toApprovalView),
-    activity: items,
+    approvals: effects.map(toApprovalView),
+    activity,
+    liveBrowsers: live,
+    timelineVersion: version,
     latestMessageId: latest.rows[0]?.id ?? null,
     demoControls: process.env.AUGUST_ENV !== "production",
     serverTime: new Date().toISOString(),
@@ -109,13 +101,14 @@ export async function buildState(userId: string): Promise<AugustState> {
 export async function buildDetail(userId: string, id: string): Promise<ResponsibilityDetail | null> {
   const r = await getResponsibility(userId, id);
   if (!r) return null;
-  const [runs, events, evidence] = await Promise.all([
-    runMap(userId),
+  const [runs, live, events, evidence] = await Promise.all([
+    activeSet(userId),
+    liveBrowsersFor(userId),
     listEvents(userId, id),
     listEvidence(userId, id),
   ]);
   return {
-    ...toView(r, runs),
+    ...toView(r, runs, live),
     goal: r.goal,
     successCriteria: r.success_criteria,
     constraints: r.constraints,
@@ -126,9 +119,9 @@ export async function buildDetail(userId: string, id: string): Promise<Responsib
     evidence: evidence.map((ev) => ({
       id: ev.id,
       provider: ev.provider,
-      title: ev.safe_summary.split("\n")[0].slice(0, 120),
+      title: ev.safe_summary.split("\n")[0].replace(/^[#>*\-\s]+|[*_`]+/g, "").slice(0, 140),
       url: ev.source_url,
-      summary: ev.safe_summary.slice(0, 600),
+      summary: ev.safe_summary.slice(0, 2000),
       observedAt: ev.observed_at.toISOString(),
     })),
   };

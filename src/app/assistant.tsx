@@ -9,6 +9,7 @@ import {
 } from "@assistant-ui/ai-sdk";
 import type { UIMessage } from "ai";
 import { AugustShell } from "@/components/august/AugustShell";
+import { isGenUiTool } from "@/lib/genui";
 import { AugustProvider, useAugust } from "@/components/august/useAugustState";
 
 export const Assistant = () => {
@@ -30,49 +31,65 @@ export const Assistant = () => {
 };
 
 /**
- * Keeps the thread in step with the conversation of record. Loads history on
- * first state, and reloads whenever the server reports a newer message (August
- * writing back after a scheduled check or a reply) while nothing is streaming.
+ * Keeps the thread in step with the timeline of record. Loads history on first
+ * state, and reloads whenever the server's timelineVersion changes (a message,
+ * an activity line, or an approval's state) while nothing is streaming.
  * GET /api/messages returns AI SDK UIMessages, so they go straight to the chat.
  */
 function ConversationSync() {
   const { state, mock } = useAugust();
   const chat = useAISDKChat();
-  const latest = state?.latestMessageId ?? null;
+  const version = state?.timelineVersion ?? null;
   const synced = useRef<string | null | undefined>(undefined);
   const busy = useRef(false);
   const streaming = chat?.status === "submitted" || chat?.status === "streaming";
 
   useEffect(() => {
     if (!chat || mock || state === null || busy.current || streaming) return;
-    if (synced.current === latest) return;
-    if (latest && chat.messages.some((m) => m.id === latest)) {
-      synced.current = latest;
-      return;
-    }
+    if (synced.current === version) return;
     busy.current = true;
     void (async () => {
       try {
         const res = await fetch("/api/messages", { cache: "no-store" });
         if (!res.ok) {
-          synced.current = latest; // no history available; don't hammer it
+          synced.current = version; // no history available; don't hammer it
           return;
         }
         const rows = (await res.json()) as UIMessage[];
-        if (rows.length === 0 && chat.messages.length > 0) {
-          synced.current = latest;
+        // Empty history, or the streamed reply isn't persisted yet: keep what's shown.
+        const behind =
+          repliedAfterLastUser(chat.messages) && !repliedAfterLastUser(rows);
+        if ((rows.length === 0 && chat.messages.length > 0) || behind) {
+          synced.current = version;
           return;
         }
         chat.setMessages(rows);
         chat.clearError();
-        synced.current = latest;
+        synced.current = version;
       } catch {
         // Network hiccup: try again on the next poll.
       } finally {
         busy.current = false;
       }
     })();
-  }, [chat, mock, state, latest, streaming]);
+  }, [chat, mock, state, version, streaming]);
 
   return null;
+}
+
+/** True when an assistant reply (text or a component) follows the last user message. */
+function repliedAfterLastUser(messages: UIMessage[]): boolean {
+  const lastUser = messages.findLastIndex((m) => m.role === "user");
+  if (lastUser < 0) return false;
+  return messages
+    .slice(lastUser + 1)
+    .some(
+      (m) =>
+        m.role === "assistant" &&
+        m.parts.some(
+          (p) =>
+            (p.type === "text" && p.text.trim() !== "") ||
+            (p.type.startsWith("tool-") && isGenUiTool(p.type.slice(5))),
+        ),
+    );
 }

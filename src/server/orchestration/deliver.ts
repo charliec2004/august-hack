@@ -1,13 +1,16 @@
 import "server-only";
 
-import { generateText } from "ai";
+import { generateText, Output } from "ai";
+import { z } from "zod";
 import { query } from "@/server/db/client";
+import { listEvidence } from "@/server/db/evidence";
 import { ensurePrimaryThread, insertMessage } from "@/server/db/messages";
 import { getResponsibility } from "@/server/db/responsibilities";
 import { trace } from "@/server/db/traces";
 import { gatewayProviderOptions, modelFor } from "@/server/agent/model";
 import { BRAIN_DELIVERY_PROMPT } from "@/server/agent/prompts/brain";
 import type { WorkerReport } from "@/server/types/domain";
+import { describeUi, safeUrl, type AskUser, type ShowOptions } from "@/lib/genui";
 
 export type DeliveryKind = "completed" | "needs_approval" | "needs_input" | "failed" | "waiting";
 
@@ -42,23 +45,46 @@ export async function deliverUpdate(input: {
     ? resp.next_wake_at.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })
     : null;
 
-  let text: string;
+  const evidence = (await listEvidence(userId, responsibilityId)).slice(0, 12).map((e) => ({
+    url: e.source_url,
+    summary: e.safe_summary.slice(0, 600),
+  }));
+  const prompt = JSON.stringify({
+    deliveryKind: kind,
+    responsibility: { title: resp.title, goal: resp.goal, constraints: resp.constraints },
+    workerReport: { status: report.status, summary: report.summary, blocker: report.blocker },
+    evidence,
+    nextCheckLocalTime: nextCheck,
+  });
+  // URLs the user may be shown: only ones that literally appear in what was found.
+  const seen = [report.summary, ...evidence.map((e) => `${e.url ?? ""} ${e.summary}`)].join("\n");
+
+  let text = "";
+  let ui: DeliveryUi | null = null;
   try {
     const out = await generateText({
       model: modelFor("brain"),
       system: BRAIN_DELIVERY_PROMPT,
-      prompt: JSON.stringify({
-        deliveryKind: kind,
-        responsibility: { title: resp.title, goal: resp.goal, constraints: resp.constraints },
-        workerReport: { status: report.status, summary: report.summary, blocker: report.blocker },
-        nextCheckLocalTime: nextCheck,
-      }),
-      abortSignal: AbortSignal.timeout(30_000),
+      prompt,
+      output: Output.object({ schema: deliverySchema }),
+      abortSignal: AbortSignal.timeout(45_000),
       providerOptions: gatewayProviderOptions,
     });
-    text = out.text.trim();
+    text = out.output.text.trim();
+    ui = sanitizeUi(out.output.ui, seen);
   } catch {
-    text = fallbackText(kind, resp.title, report, nextCheck);
+    try {
+      const out = await generateText({
+        model: modelFor("brain"),
+        system: `${BRAIN_DELIVERY_PROMPT}\n\nOutput only the message text, with no ui.`,
+        prompt,
+        abortSignal: AbortSignal.timeout(30_000),
+        providerOptions: gatewayProviderOptions,
+      });
+      text = out.text.trim();
+    } catch {
+      text = fallbackText(kind, resp.title, report, nextCheck);
+    }
   }
   if (!text) return;
 
@@ -67,8 +93,13 @@ export async function deliverUpdate(input: {
     threadId,
     userId,
     role: "assistant",
-    content: text,
-    parts: [{ type: "text", text }],
+    // The model's history sees what the cards showed (so "I choose: X" resolves).
+    content: ui ? `${text}\n\n${describeUi(ui.kind === "options" ? { options: ui.data } : { question: ui.data })}` : text,
+    parts: [
+      { type: "text", text },
+      ...(ui?.kind === "options" ? [{ type: "data-options", data: ui.data }] : []),
+      ...(ui?.kind === "question" ? [{ type: "data-question", data: ui.data }] : []),
+    ],
     responsibilityId,
   });
   await trace({
@@ -94,4 +125,78 @@ function fallbackText(kind: DeliveryKind, title: string, report: WorkerReport, n
         ? `Nothing good for ${title.toLowerCase()} yet. I'll check again around ${nextCheck}.`
         : `Nothing good for ${title.toLowerCase()} yet. I'll keep checking.`;
   }
+}
+
+/* Structured delivery output. Strict JSON schema: nullable, never optional. */
+
+const deliverySchema = z.object({
+  text: z.string(),
+  ui: z
+    .object({
+      options: z
+        .object({
+          title: z.string(),
+          options: z
+            .array(
+              z.object({
+                name: z.string(),
+                subtitle: z.string().nullable(),
+                url: z.string().nullable(),
+                imageUrl: z.string().nullable(),
+                badge: z.string().nullable(),
+                facts: z.array(z.object({ label: z.string(), value: z.string() })),
+              }),
+            )
+            .max(8),
+        })
+        .nullable(),
+      question: z
+        .object({
+          question: z.string(),
+          choices: z.array(z.object({ label: z.string(), detail: z.string().nullable() })).max(6),
+        })
+        .nullable(),
+    })
+    .nullable(),
+});
+
+type DeliveryUi = { kind: "options"; data: ShowOptions } | { kind: "question"; data: AskUser };
+
+/** Keep only links/images that appeared in evidence; drop anything malformed. */
+function sanitizeUi(ui: z.infer<typeof deliverySchema>["ui"], seen: string): DeliveryUi | null {
+  const known = (u: string | null) => {
+    const url = safeUrl(u);
+    return url && u && seen.includes(u) ? url : undefined;
+  };
+  if (ui?.options && ui.options.options.length >= 2) {
+    return {
+      kind: "options",
+      data: {
+        title: ui.options.title,
+        options: ui.options.options.map((o, i) => ({
+          id: String(i + 1),
+          name: o.name,
+          subtitle: o.subtitle ?? undefined,
+          url: known(o.url),
+          imageUrl: known(o.imageUrl),
+          badge: o.badge ?? undefined,
+          facts: o.facts.slice(0, 4),
+        })),
+      },
+    };
+  }
+  if (ui?.question && ui.question.choices.length >= 2) {
+    return {
+      kind: "question",
+      data: {
+        question: ui.question.question,
+        choices: ui.question.choices.map((c, i) => ({
+          id: String(i + 1),
+          label: c.label,
+          detail: c.detail ?? undefined,
+        })),
+      },
+    };
+  }
+  return null;
 }

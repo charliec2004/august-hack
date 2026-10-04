@@ -1,10 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { CheckIcon, LoaderCircleIcon, TriangleAlertIcon } from "lucide-react";
+import {
+  CheckIcon,
+  CircleSlashIcon,
+  LoaderCircleIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { ApprovalView } from "@/server/types/api";
+import type { ApprovalView, TimelineApprovalData } from "@/server/types/api";
+import { formatWhen } from "./format";
 import { useAugust } from "./useAugustState";
 
 const CLASS_NOTE: Record<ApprovalView["effectClass"], string | null> = {
@@ -14,13 +20,16 @@ const CLASS_NOTE: Record<ApprovalView["effectClass"], string | null> = {
 };
 
 /**
- * Renders one frozen effect proposal exactly as persisted. Approving posts the
- * proposalHash shown here, so the server executes precisely this card.
+ * Renders one frozen effect proposal exactly as persisted, where it appeared in
+ * the conversation. Pending: Approve / Not now (approving posts the proposalHash
+ * shown here, so the server executes precisely this card). Resolved: the same
+ * card with a status line in place of the buttons.
  */
 export function ApprovalCard({ approval }: { approval: ApprovalView }) {
   const { decide } = useAugust();
   const [pending, setPending] = useState<"approved" | "denied" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const isPending = approval.state === "pending";
   const irreversible = approval.effectClass === "irreversible";
   const note = CLASS_NOTE[approval.effectClass];
 
@@ -32,19 +41,23 @@ export function ApprovalCard({ approval }: { approval: ApprovalView }) {
       setError(result.error);
       setPending(null);
     }
-    // On success the card leaves with the next state refresh.
+    // On success the card turns into its resolved state on the next refresh.
   }
 
   return (
     <section
-      aria-label={`Approval needed: ${approval.responsibilityTitle}`}
+      aria-label={`${isPending ? "Approval needed" : "Approval"}: ${approval.responsibilityTitle}`}
       data-effect-class={approval.effectClass}
+      data-state={approval.state}
       className={cn(
-        "bg-card text-card-foreground animate-in fade-in slide-in-from-bottom-2 relative overflow-hidden rounded-2xl border shadow-[0_1px_2px_rgba(60,40,20,0.04),0_8px_24px_-12px_rgba(60,40,20,0.18)] duration-300",
-        irreversible && "border-irreversible/40",
+        "bg-card text-card-foreground animate-in fade-in relative my-2 overflow-hidden rounded-2xl border duration-300",
+        isPending
+          ? "shadow-[0_1px_2px_rgba(60,40,20,0.04),0_8px_24px_-12px_rgba(60,40,20,0.18)]"
+          : "shadow-[0_1px_2px_rgba(60,40,20,0.04)]",
+        irreversible && isPending && "border-irreversible/40",
       )}
     >
-      {irreversible && (
+      {irreversible && isPending && (
         <div
           aria-hidden
           className="bg-irreversible absolute inset-y-0 left-0 w-1"
@@ -55,7 +68,7 @@ export function ApprovalCard({ approval }: { approval: ApprovalView }) {
           <p className="text-muted-foreground truncate text-xs font-medium tracking-wide">
             {approval.responsibilityTitle}
           </p>
-          {note && (
+          {note && isPending && (
             <span
               className={cn(
                 "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
@@ -88,12 +101,17 @@ export function ApprovalCard({ approval }: { approval: ApprovalView }) {
         )}
 
         {approval.body != null && approval.body !== "" && (
-          <blockquote className="border-foreground/15 bg-muted/50 text-foreground/90 mt-3 max-h-80 overflow-y-auto rounded-r-lg border-l-2 px-4 py-3 text-sm leading-relaxed break-words whitespace-pre-wrap">
+          <blockquote
+            className={cn(
+              "border-foreground/15 bg-muted/50 text-foreground/90 mt-3 overflow-y-auto rounded-r-lg border-l-2 px-4 py-3 text-sm leading-relaxed break-words whitespace-pre-wrap",
+              isPending ? "max-h-80" : "max-h-44",
+            )}
+          >
             {approval.body}
           </blockquote>
         )}
 
-        {approval.question && (
+        {approval.question && isPending && (
           <p className="text-foreground/80 mt-3 text-sm">{approval.question}</p>
         )}
 
@@ -103,45 +121,83 @@ export function ApprovalCard({ approval }: { approval: ApprovalView }) {
           </p>
         )}
 
-        <div className="mt-4 flex items-center gap-2">
-          <Button
-            size="lg"
-            className="min-w-24 rounded-full px-4"
-            disabled={pending !== null}
-            onClick={() => onDecide("approved")}
-          >
-            {pending === "approved" ? (
-              <LoaderCircleIcon className="animate-spin" />
-            ) : (
-              <CheckIcon />
-            )}
-            {pending === "approved" ? "Approving" : "Approve"}
-          </Button>
-          <Button
-            size="lg"
-            variant="ghost"
-            className="rounded-full px-4"
-            disabled={pending !== null}
-            onClick={() => onDecide("denied")}
-          >
-            {pending === "denied" && (
-              <LoaderCircleIcon className="animate-spin" />
-            )}
-            Not now
-          </Button>
-        </div>
+        {isPending ? (
+          <div className="mt-4 flex items-center gap-2">
+            <Button
+              size="lg"
+              className="min-w-24 rounded-full px-4"
+              disabled={pending !== null}
+              onClick={() => onDecide("approved")}
+            >
+              {pending === "approved" ? (
+                <LoaderCircleIcon className="animate-spin" />
+              ) : (
+                <CheckIcon />
+              )}
+              {pending === "approved" ? "Approving" : "Approve"}
+            </Button>
+            <Button
+              size="lg"
+              variant="ghost"
+              className="rounded-full px-4"
+              disabled={pending !== null}
+              onClick={() => onDecide("denied")}
+            >
+              {pending === "denied" && (
+                <LoaderCircleIcon className="animate-spin" />
+              )}
+              Not now
+            </Button>
+          </div>
+        ) : (
+          <ResolvedStatus approval={approval} />
+        )}
       </div>
     </section>
   );
 }
 
-export function ApprovalStack({ approvals }: { approvals: ApprovalView[] }) {
-  if (approvals.length === 0) return null;
+function ResolvedStatus({ approval }: { approval: ApprovalView }) {
+  const when = approval.settledAt ?? approval.decidedAt;
+  const at = when ? ` ${formatWhen(when)}` : "";
+  const sentVerb = approval.kind === "email" ? "Sent" : "Done";
+  const line: Record<Exclude<ApprovalView["state"], "pending">, { icon: React.ReactNode; text: string; tone: string }> = {
+    sending: {
+      icon: <LoaderCircleIcon className="size-4 animate-spin" />,
+      text: approval.kind === "email" ? "Sending…" : "Working on it…",
+      tone: "text-muted-foreground",
+    },
+    sent: { icon: <CheckIcon className="text-live size-4" />, text: `${sentVerb}${at}`, tone: "text-foreground/80" },
+    declined: {
+      icon: <CircleSlashIcon className="size-4" />,
+      text: approval.kind === "email" ? "Not sent — you declined" : "Not done — you declined",
+      tone: "text-muted-foreground",
+    },
+    failed: {
+      icon: <TriangleAlertIcon className="text-irreversible size-4" />,
+      text: approval.kind === "email" ? "Couldn't send" : "Couldn't finish this",
+      tone: "text-irreversible",
+    },
+    uncertain: {
+      icon: <LoaderCircleIcon className="size-4 animate-spin [animation-duration:2s]" />,
+      text: "Checking whether it went through",
+      tone: "text-muted-foreground",
+    },
+  };
+  if (approval.state === "pending") return null;
+  const { icon, text, tone } = line[approval.state];
   return (
-    <div className="flex max-h-[55dvh] flex-col gap-3 overflow-y-auto px-0.5 pt-1 pb-0.5">
-      {approvals.map((a) => (
-        <ApprovalCard key={`${a.effectId}:${a.proposalHash}`} approval={a} />
-      ))}
-    </div>
+    <p role="status" className={cn("mt-4 flex items-center gap-2 text-sm font-medium", tone)}>
+      {icon}
+      {text}
+    </p>
   );
+}
+
+/** `data-approval` timeline part: the card for one effect, from live state. */
+export function ApprovalPart({ data }: { data: TimelineApprovalData }) {
+  const { state } = useAugust();
+  const approval = state?.approvals.find((a) => a.effectId === data.effectId);
+  if (!approval) return null;
+  return <ApprovalCard key={`${approval.effectId}:${approval.proposalHash}`} approval={approval} />;
 }

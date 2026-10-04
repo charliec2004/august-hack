@@ -163,7 +163,15 @@ export function useAugustState(): AugustStore {
           const s = prev ?? mockState();
           return {
             ...s,
-            approvals: s.approvals.filter((a) => a.effectId !== approval.effectId),
+            approvals: s.approvals.map((a) =>
+              a.effectId === approval.effectId
+                ? {
+                    ...a,
+                    state: decision === "approved" ? "sent" : "declined",
+                    decidedAt: new Date().toISOString(),
+                  }
+                : a,
+            ),
           };
         });
         return { ok: true };
@@ -255,6 +263,10 @@ function mockState(): AugustState {
     serverTime: new Date().toISOString(),
     demoControls: true,
     latestMessageId: null,
+    timelineVersion: "mock",
+    liveBrowsers: [
+      { sessionId: "run-refund", responsibilityId: "r-refund", liveViewUrl: "about:blank" },
+    ],
     responsibilities: [
       {
         id: "r-dinner",
@@ -330,14 +342,17 @@ function mockState(): AugustState {
         proposalHash: "mock-hash-1",
         question: null,
         createdAt: minutesFromNow(-2),
+        state: "pending",
+        decidedAt: null,
+        settledAt: null,
       },
     ],
     activity: [
-      { id: "a1", at: minutesFromNow(-14), responsibilityId: "r-dinner", text: "Read your calendar: free after 6 PM", liveViewUrl: null },
-      { id: "a2", at: minutesFromNow(-12), responsibilityId: "r-dinner", text: "Checked 5 restaurants near you", liveViewUrl: null },
-      { id: "a3", at: minutesFromNow(-9), responsibilityId: "r-dinner", text: "No open tables between 6:30 and 8 yet", liveViewUrl: null },
-      { id: "a4", at: minutesFromNow(-2), responsibilityId: "r-dinner", text: "Drafted a note to Lula asking about cancellations", liveViewUrl: null },
-      { id: "a5", at: minutesFromNow(-1), responsibilityId: "r-refund", text: "Checking the refund status on the airline site", liveViewUrl: "about:blank" },
+      { id: "a1", at: minutesFromNow(-14), responsibilityId: "r-dinner", text: "Read your calendar: free after 6 PM", browserSessionId: null },
+      { id: "a2", at: minutesFromNow(-12), responsibilityId: "r-dinner", text: "Checked 5 restaurants near you", browserSessionId: null },
+      { id: "a3", at: minutesFromNow(-9), responsibilityId: "r-dinner", text: "No open tables between 6:30 and 8 yet", browserSessionId: null },
+      { id: "a4", at: minutesFromNow(-2), responsibilityId: "r-dinner", text: "Drafted a note to Lula asking about cancellations", browserSessionId: null },
+      { id: "a5", at: minutesFromNow(-1), responsibilityId: "r-refund", text: "Checking the refund status on the airline site", browserSessionId: null },
     ],
   };
 }

@@ -3,130 +3,101 @@
 import { useState } from "react";
 import { ChevronDownIcon, MonitorPlayIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ActivityItem, ResponsibilityView } from "@/server/types/api";
+import type { LiveBrowser, TimelineActivityItem } from "@/server/types/api";
 import { formatWhen } from "./format";
+import { liveBrowserForLine, useShellActions } from "./shellActions";
+import { useAugust } from "./useAugustState";
 
 const COLLAPSED_COUNT = 4;
 
-function chronological(items: ActivityItem[]) {
-  return [...items].sort(
-    (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime(),
-  );
-}
+type Line = Pick<TimelineActivityItem, "id" | "text" | "at" | "responsibilityId" | "browserSessionId"> & {
+  responsibilityTitle?: string | null;
+};
 
 /**
- * Calm, evidence-oriented record of what August actually did. Lives under the
- * conversation; newest at the bottom like the thread itself.
+ * A run of activity lines inline in the conversation, where they happened.
+ * Calm and small; long runs collapse to the newest few.
  */
-export function ActivityFeed({
-  activity,
-  responsibilities,
-  onWatch,
-  onOpenResponsibility,
-}: {
-  activity: ActivityItem[];
-  responsibilities: ResponsibilityView[];
-  onWatch: (item: ActivityItem) => void;
-  onOpenResponsibility: (id: string) => void;
-}) {
+export function ActivityLines({ items }: { items: TimelineActivityItem[] }) {
   const [expanded, setExpanded] = useState(false);
-  if (activity.length === 0) return null;
-
-  const items = chronological(activity);
+  if (items.length === 0) return null;
   const hidden = Math.max(0, items.length - COLLAPSED_COUNT);
   const visible = expanded ? items : items.slice(-COLLAPSED_COUNT);
-  const titles = new Map(responsibilities.map((r) => [r.id, r.title]));
 
   return (
-    <section aria-label="Activity" className="mb-6 px-2">
-      <div className="mb-1.5 flex items-center gap-2">
-        <h2 className="text-muted-foreground text-[11px] font-semibold tracking-[0.12em] uppercase">
-          Activity
-        </h2>
-        <span className="bg-border h-px flex-1" aria-hidden />
-        {hidden > 0 && (
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            aria-expanded={expanded}
-            className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs transition-colors"
-          >
-            {expanded ? "Show less" : `${hidden} earlier`}
-            <ChevronDownIcon
-              className={cn(
-                "size-3.5 transition-transform",
-                expanded && "rotate-180",
-              )}
-            />
-          </button>
-        )}
-      </div>
-      <ActivityList
-        items={visible}
-        titles={titles}
-        onWatch={onWatch}
-        onOpenResponsibility={onOpenResponsibility}
-      />
-    </section>
+    <div data-slot="august-activity" className="my-1">
+      {hidden > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="text-muted-foreground/80 hover:text-foreground mb-0.5 inline-flex items-center gap-1 text-xs transition-colors"
+        >
+          {expanded ? "Show less" : `${hidden} earlier ${hidden === 1 ? "step" : "steps"}`}
+          <ChevronDownIcon className={cn("size-3.5 transition-transform", expanded && "rotate-180")} />
+        </button>
+      )}
+      <ActivityList items={visible} showTitles />
+    </div>
   );
 }
 
-export function ActivityList({
-  items,
-  titles,
-  onWatch,
-  onOpenResponsibility,
-}: {
-  items: ActivityItem[];
-  titles?: Map<string, string>;
-  onWatch?: (item: ActivityItem) => void;
-  onOpenResponsibility?: (id: string) => void;
-}) {
+/** Plain list of activity lines. "Watch browser" only while that session is live. */
+export function ActivityList({ items, showTitles = false }: { items: Line[]; showTitles?: boolean }) {
+  const { state } = useAugust();
+  const { watch, openResponsibility } = useShellActions();
   return (
     <ol className="flex flex-col">
-      {items.map((item) => {
-        const title =
-          item.responsibilityId && titles?.get(item.responsibilityId);
+      {items.map((item, i) => {
+        const live = liveBrowserForLine(state, item);
+        // Name the responsibility once per stretch, not on every line.
+        const titled =
+          showTitles &&
+          item.responsibilityTitle &&
+          item.responsibilityId &&
+          items[i - 1]?.responsibilityId !== item.responsibilityId;
         return (
           <li
             key={item.id}
-            className="animate-in fade-in grid grid-cols-[4.75rem_1fr] items-baseline gap-x-3 py-1 text-[13px] leading-5 duration-300"
+            className="animate-in fade-in flex items-baseline gap-2 py-0.5 text-[13px] leading-5 duration-300"
           >
-            <time
-              dateTime={item.at}
-              className="text-muted-foreground/80 text-right text-xs tabular-nums"
-            >
-              {formatWhen(item.at)}
-            </time>
-            <div className="min-w-0">
-              {title && item.responsibilityId && onOpenResponsibility ? (
+            <span className="bg-muted-foreground/35 size-1 shrink-0 translate-y-[-2px] rounded-full" aria-hidden />
+            <div className="text-muted-foreground min-w-0 flex-1">
+              {titled ? (
                 <button
                   type="button"
-                  onClick={() => onOpenResponsibility(item.responsibilityId!)}
-                  className="text-muted-foreground hover:text-foreground mr-1.5 transition-colors"
+                  onClick={() => openResponsibility(item.responsibilityId!)}
+                  className="hover:text-foreground mr-1.5 transition-colors"
                 >
-                  {title}
+                  {item.responsibilityTitle}
                   <span aria-hidden> ·</span>
                 </button>
               ) : null}
-              <span className="text-foreground/85">{item.text}</span>
-              {item.liveViewUrl && onWatch && (
-                <button
-                  type="button"
-                  onClick={() => onWatch(item)}
-                  className="text-foreground/70 hover:text-foreground hover:bg-muted ml-2 inline-flex translate-y-[1px] items-center gap-1 rounded-md px-1.5 text-xs transition-colors"
-                >
-                  <span className="bg-live relative flex size-1.5 rounded-full" aria-hidden>
-                    <span className="bg-live absolute inset-0 animate-ping rounded-full opacity-60 motion-reduce:hidden" />
-                  </span>
-                  <MonitorPlayIcon className="size-3.5" />
-                  Watch browser
-                </button>
-              )}
+              <span className="text-foreground/75">{item.text}</span>
+              <time dateTime={item.at} className="text-muted-foreground/60 ml-2 text-xs tabular-nums">
+                {formatWhen(item.at)}
+              </time>
+              {live && <WatchButton browser={live} onWatch={watch} />}
             </div>
           </li>
         );
       })}
     </ol>
+  );
+}
+
+function WatchButton({ browser, onWatch }: { browser: LiveBrowser; onWatch: (b: LiveBrowser) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onWatch(browser)}
+      className="text-foreground/70 hover:text-foreground hover:bg-muted ml-2 inline-flex translate-y-[1px] items-center gap-1 rounded-md px-1.5 text-xs transition-colors"
+    >
+      <span className="bg-live relative flex size-1.5 rounded-full" aria-hidden>
+        <span className="bg-live absolute inset-0 animate-ping rounded-full opacity-60 motion-reduce:hidden" />
+      </span>
+      <MonitorPlayIcon className="size-3.5" />
+      Watch browser
+    </button>
   );
 }

@@ -1,7 +1,18 @@
 import "server-only";
 
-import type { EffectRow } from "@/server/db/effects";
-import type { ApprovalField, ApprovalView } from "@/server/types/api";
+import type { EffectRow, EffectStatus } from "@/server/db/effects";
+import type { ApprovalField, ApprovalState, ApprovalView } from "@/server/types/api";
+
+const STATE: Record<EffectStatus, ApprovalState> = {
+  prepared: "pending",
+  waiting_approval: "pending",
+  authorized: "sending",
+  dispatching: "sending",
+  succeeded: "sent",
+  denied: "declined",
+  failed: "failed",
+  uncertain: "uncertain",
+};
 
 /**
  * Approval cards are rendered from the persisted frozen proposal, never from
@@ -29,7 +40,7 @@ function fieldsFrom(obj: Record<string, unknown>, skip: string[] = []): Approval
 }
 
 export function toApprovalView(
-  e: EffectRow & { responsibility_title: string },
+  e: EffectRow & { responsibility_title: string; decided_at?: Date | null; settled_at?: Date | null },
 ): ApprovalView {
   const a = e.canonical_args;
   const f = e.material_facts;
@@ -41,6 +52,9 @@ export function toApprovalView(
     proposalHash: e.proposal_hash,
     question: e.review_decision === "needs_confirmation" ? e.review_reason : null,
     createdAt: e.created_at.toISOString(),
+    state: STATE[e.status],
+    decidedAt: e.decided_at ? e.decided_at.toISOString() : null,
+    settledAt: e.settled_at ? e.settled_at.toISOString() : null,
   };
   // A reviewer reason code (snake_case) is not a user-facing question.
   if (base.question && /^[a-z0-9_]+$/.test(base.question)) base.question = null;
