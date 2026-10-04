@@ -92,6 +92,41 @@ export async function prepareEffect(input: {
     };
   }
 
+  // Deterministic duplicate guard: the same email (same recipients, same subject) already sent for this
+  // responsibility is never proposed again. Follow-ups must be a genuinely different message.
+  if (draft.provider === "agentmail" && draft.action === "send_email") {
+    const norm = (v: unknown) => String(v ?? "").toLowerCase().replace(/^(re|fwd?):\s*/g, "").replace(/\s+/g, " ").trim();
+    const recipients = (v: unknown) => [...(Array.isArray(v) ? v : [v])].map(norm).sort().join(",");
+    const sent = await query<{ canonical_args: Record<string, unknown> }>(
+      `select canonical_args from effect_proposals
+        where user_id = $1 and responsibility_id = $2 and provider = 'agentmail' and action = 'send_email'
+          and status in ('succeeded','dispatching','uncertain')`,
+      [userId, responsibilityId],
+    );
+    const dup = sent.rows.some(
+      (r) =>
+        recipients(r.canonical_args.to) === recipients(exactArgs.to) &&
+        norm(r.canonical_args.subject) === norm(exactArgs.subject),
+    );
+    if (dup) {
+      return {
+        effectId: "",
+        status: "denied",
+        decision: { decision: "denied", reasonCode: "duplicate_of_sent_email" },
+        proposalHash: hash,
+      };
+    }
+  }
+
+  // A new proposal of the same kind replaces any older one still waiting for the user:
+  // the old card can no longer be approved, so there is only ever one live ask.
+  await query(
+    `update effect_proposals set status = 'denied', review_reason = 'superseded', updated_at = now()
+      where user_id = $1 and responsibility_id = $2 and provider = $3 and action = $4
+        and status = 'waiting_approval'`,
+    [userId, responsibilityId, draft.provider, draft.action],
+  );
+
   const key = idempotencyKey({
     userId,
     responsibilityId,

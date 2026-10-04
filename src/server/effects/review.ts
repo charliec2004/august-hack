@@ -25,7 +25,8 @@ export type ReviewInput = {
 const schema = z.object({
   decision: z.enum(["authorized", "needs_confirmation", "denied"]),
   reasonCode: z.string().min(1).max(80),
-  userFacingQuestion: z.string().max(400).optional(),
+  // Strict structured output: every key required, so "no question" is null, not absent.
+  userFacingQuestion: z.string().max(400).nullable(),
 });
 
 export async function reviewEffect(
@@ -61,10 +62,7 @@ export async function reviewEffect(
       abortSignal: AbortSignal.timeout(opts.timeoutMs ?? 20_000),
       providerOptions: gatewayProviderOptions,
     });
-    if (object.decision === "needs_confirmation" && !object.userFacingQuestion) {
-      return { ...object, userFacingQuestion: undefined };
-    }
-    return object;
+    return { ...object, userFacingQuestion: object.userFacingQuestion ?? undefined };
   } catch {
     return { decision: "needs_confirmation", reasonCode: "reviewer_unavailable_fail_closed" };
   }

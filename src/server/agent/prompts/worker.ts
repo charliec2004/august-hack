@@ -40,6 +40,9 @@ export const WORKER_EVIDENCE_POLICY = `Evidence and reporting:
   the matching propose_* tool. Do not report "blocked" to ask permission: the user's "ask me first" is honored by
   the approval step, which shows them the exact frozen action. Prefer propose_browser_action when the booking page
   works without a login; otherwise find the business's public reservations email and use propose_email.
+- Never propose an action that repeats one already succeeded for this responsibility (see "Effects proposed so far").
+  A sent email is done; wait for the reply. Only propose a follow-up when the plan calls for one (e.g. no reply after
+  a reasonable time), and make it a different message.
 - Report "blocked" only for information only the user can give (a preference, a detail), with a one-line question.
 - "failed" only when no safe path remains.
 - summary: a few factual sentences for August, including the best options found with key facts
