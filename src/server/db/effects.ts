@@ -30,6 +30,10 @@ export type EffectRow = {
   idempotency_key: string;
   attempt: number;
   dispatch_claimed_at: Date | null;
+  /** Send later: an authorized effect is not dispatched before this time. */
+  scheduled_for: Date | null;
+  /** Set on a user-authored proposal that replaced an edited agent proposal. */
+  supersedes_effect_id: string | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -58,6 +62,7 @@ export type UserFacingEffectRow = EffectRow & {
   responsibility_title: string;
   decided_at: Date | null;
   settled_at: Date | null;
+  superseded_by: string | null;
 };
 
 /**
@@ -69,7 +74,9 @@ export async function recentUserFacingEffects(userId: string, limit = 50) {
   const { rows } = await query<UserFacingEffectRow>(
     `select e.*, r.title as responsibility_title,
             (select max(a.created_at) from approvals a where a.effect_proposal_id = e.id) as decided_at,
-            (select max(x.created_at) from effect_receipts x where x.effect_proposal_id = e.id) as settled_at
+            (select max(x.created_at) from effect_receipts x where x.effect_proposal_id = e.id) as settled_at,
+            (select s.id from effect_proposals s where s.supersedes_effect_id = e.id
+              order by s.created_at desc limit 1) as superseded_by
        from effect_proposals e join responsibilities r on r.id = e.responsibility_id
       where e.user_id = $1
         and e.created_at > now() - interval '48 hours'

@@ -201,6 +201,9 @@ export async function findStranded(userId?: string) {
              and (wr.lease_expires_at is null or wr.lease_expires_at > now()))
         and not exists (
           select 1 from wakeups w where w.responsibility_id = r.id and w.status in ('pending','claimed'))
+        and not exists (
+          select 1 from effect_proposals e where e.responsibility_id = r.id
+             and e.status = 'authorized' and e.scheduled_for is not null)
         and r.updated_at < now() - interval '2 minutes'`,
     [userId ?? null],
   );

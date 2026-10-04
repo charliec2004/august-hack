@@ -39,11 +39,25 @@ function fieldsFrom(obj: Record<string, unknown>, skip: string[] = []): Approval
     .map(([k, v]) => ({ label: humanize(k), value: str(v) }));
 }
 
+const list = (v: unknown): string[] =>
+  (Array.isArray(v) ? v : v === null || v === undefined || v === "" ? [] : [v]).map(str).filter(Boolean);
+
+function stateOf(e: EffectRow): ApprovalState {
+  if (e.status === "authorized" && e.scheduled_for && e.scheduled_for.getTime() > Date.now()) return "scheduled";
+  return STATE[e.status];
+}
+
 export function toApprovalView(
-  e: EffectRow & { responsibility_title: string; decided_at?: Date | null; settled_at?: Date | null },
+  e: EffectRow & {
+    responsibility_title: string;
+    decided_at?: Date | null;
+    settled_at?: Date | null;
+    superseded_by?: string | null;
+  },
 ): ApprovalView {
   const a = e.canonical_args;
   const f = e.material_facts;
+  const state = stateOf(e);
   const base = {
     effectId: e.id,
     responsibilityId: e.responsibility_id,
@@ -52,31 +66,51 @@ export function toApprovalView(
     proposalHash: e.proposal_hash,
     question: e.review_decision === "needs_confirmation" ? e.review_reason : null,
     createdAt: e.created_at.toISOString(),
-    state: STATE[e.status],
+    state,
+    scheduledFor: e.scheduled_for ? e.scheduled_for.toISOString() : null,
     decidedAt: e.decided_at ? e.decided_at.toISOString() : null,
     settledAt: e.settled_at ? e.settled_at.toISOString() : null,
+    supersededBy: e.superseded_by ?? null,
+    supersedes: e.supersedes_effect_id,
+    email: null,
+    editable: false,
   };
   // A reviewer reason code (snake_case) is not a user-facing question.
   if (base.question && /^[a-z0-9_]+$/.test(base.question)) base.question = null;
 
   const key = `${e.provider}.${e.action}`;
   if (key === "agentmail.send_email" || key === "agentmail.reply") {
+    const email = {
+      from: str(a.fromInbox ?? a.from),
+      to: list(a.to),
+      cc: list(a.cc),
+      subject: str(a.subject),
+      body: str(a.text ?? a.body),
+      isReply: typeof a.replyToMessageId === "string" || key === "agentmail.reply",
+    };
     const fields: ApprovalField[] = [
-      { label: "From", value: str(a.fromInbox ?? a.from) },
-      { label: "To", value: str(a.to) },
+      { label: "From", value: email.from },
+      { label: "To", value: email.to.join(", ") },
     ];
-    if (a.cc) fields.push({ label: "Cc", value: str(a.cc) });
-    if (a.bcc) fields.push({ label: "Bcc", value: str(a.bcc) });
-    fields.push({ label: "Subject", value: str(a.subject) });
-    if (a.attachments) fields.push({ label: "Attachments", value: str(a.attachments) });
-    return { ...base, kind: "email", headline: "August wants to send:", fields, body: str(a.text ?? a.body) || null };
+    if (email.cc.length) fields.push({ label: "Cc", value: email.cc.join(", ") });
+    fields.push({ label: "Subject", value: email.subject });
+    return {
+      ...base,
+      kind: "email",
+      title: email.subject ? `Email: ${email.subject}` : "Send an email",
+      fields,
+      body: email.body || null,
+      email,
+      // Only plain sends are editable; attachments/bcc would be uneditable hidden args.
+      editable: key === "agentmail.send_email" && state === "pending" && !a.attachments && !a.bcc,
+    };
   }
   if (e.provider === "kernel") {
     const isBooking = /book|reserv/i.test(e.action);
     return {
       ...base,
       kind: isBooking ? "booking" : "form",
-      headline: isBooking ? "August wants to book:" : "August wants to submit:",
+      title: isBooking ? "Book this" : "Submit this form",
       fields: [...fieldsFrom(f), ...fieldsFrom(a, ["selector", "script", "instruction", "sessionHint"])],
       body: null,
     };
@@ -85,7 +119,11 @@ export function toApprovalView(
     return {
       ...base,
       kind: "calendar",
-      headline: "August wants to change your calendar:",
+      title: /delete/i.test(e.action)
+        ? "Remove this from your calendar"
+        : /update/i.test(e.action)
+          ? "Change this calendar event"
+          : "Add this to your calendar",
       fields: [...fieldsFrom(f), ...fieldsFrom(a, ["program", "code"])],
       body: null,
     };
@@ -95,7 +133,7 @@ export function toApprovalView(
       return {
         ...base,
         kind: "computer",
-        headline: "August wants to change the software on your computers:",
+        title: "Change the software on your computers",
         fields: fieldsFrom(f),
         body: null,
       };
@@ -103,7 +141,7 @@ export function toApprovalView(
     return {
       ...base,
       kind: "computer",
-      headline: "August wants to run this on its computer:",
+      title: "Run this on August's computer",
       fields: fieldsFrom(f),
       body: str(a.command) || null,
     };
@@ -111,8 +149,8 @@ export function toApprovalView(
   return {
     ...base,
     kind: "generic",
-    headline: "August wants to do this:",
-    fields: [{ label: "Action", value: humanize(e.action) }, ...fieldsFrom(f), ...fieldsFrom(a)],
+    title: humanize(e.action),
+    fields: [...fieldsFrom(f), ...fieldsFrom(a)],
     body: null,
   };
 }

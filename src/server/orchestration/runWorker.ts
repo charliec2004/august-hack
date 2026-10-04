@@ -107,7 +107,11 @@ export async function runWorkerForWake(wake: WakeRow): Promise<string> {
       effects: effects.map((e) => ({
         id: e.id,
         action: `${e.provider}.${e.action}`,
-        status: e.status,
+        // An approved send-later effect is handled: it dispatches on its own at that time.
+        status:
+          e.status === "authorized" && e.scheduled_for
+            ? `approved_scheduled_for ${e.scheduled_for.toISOString()} (sends automatically; do not propose it again)`
+            : e.status,
         args: e.canonical_args,
       })),
     });

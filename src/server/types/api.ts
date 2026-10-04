@@ -73,7 +73,27 @@ export type ResponsibilityDetail = ResponsibilityView & {
 export type ApprovalField = { label: string; value: string };
 
 /** Where a user-facing effect stands, derived from effect_proposals.status. */
-export type ApprovalState = "pending" | "sending" | "sent" | "declined" | "failed" | "uncertain";
+export type ApprovalState =
+  | "pending"
+  /** Approved for a later time; not dispatched until `scheduledFor`. */
+  | "scheduled"
+  | "sending"
+  | "sent"
+  | "declined"
+  | "failed"
+  | "uncertain";
+
+/** The exact email an email effect will send, from the frozen proposal. */
+export type ApprovalEmail = {
+  /** August's sending inbox. Never editable. */
+  from: string;
+  to: string[];
+  cc: string[];
+  subject: string;
+  body: string;
+  /** A reply in an existing thread (the subject is the thread's). */
+  isReply: boolean;
+};
 
 export type ApprovalView = {
   effectId: string;
@@ -81,23 +101,33 @@ export type ApprovalView = {
   responsibilityTitle: string;
   /** Card layout hint (spec 42.4). */
   kind: "email" | "booking" | "calendar" | "form" | "computer" | "generic";
-  /** e.g. "August wants to send:" */
-  headline: string;
+  /** One line saying what will happen, e.g. "Book this table". */
+  title: string;
   effectClass: EffectClass;
   /** Every material field, rendered from the frozen proposal. */
   fields: ApprovalField[];
   /** Full message body / command text, if any. Rendered verbatim. */
   body: string | null;
+  /** Structured email (kind "email" only). */
+  email: ApprovalEmail | null;
+  /** The user may edit to/subject/body before sending (POST .../revise). */
+  editable: boolean;
   /** The frozen proposal hash the approval binds to. */
   proposalHash: string;
   /** Reviewer's question when it returned needs_confirmation. */
   question: string | null;
   createdAt: string;
   state: ApprovalState;
+  /** Send-later time (ISO) for an approved effect, if any. */
+  scheduledFor: string | null;
   /** When the user approved or declined, if they have. */
   decidedAt: string | null;
   /** When the outcome was recorded (receipt), if it has been. */
   settledAt: string | null;
+  /** The user-edited effect that replaced this one, if the user edited it. */
+  supersededBy: string | null;
+  /** The agent proposal this user-edited effect replaced. */
+  supersedes: string | null;
 };
 
 export type ActivityItem = {
@@ -160,6 +190,17 @@ export type ApprovalDecisionRequest = {
   decision: "approved" | "denied";
   /** Must equal the proposalHash the user was shown. */
   proposalHash: string;
+  /** Send later (approve only), ISO time. */
+  sendAt?: string | null;
+};
+
+/** POST /api/approvals/:id/revise body: the user's edited email. */
+export type ApprovalReviseRequest = {
+  shownProposalHash: string;
+  to: string[];
+  subject: string;
+  body: string;
+  sendAt?: string | null;
 };
 
 /* App surfaces beyond the conversation. ----------------------------------- */

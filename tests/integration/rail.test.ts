@@ -20,6 +20,9 @@ d("exact-effect rail + wakes (real Postgres)", async () => {
   const { decideApproval, ApprovalConflict } = await import("@/server/effects/approve");
   const { executeEffect, EffectIntegrityError } = await import("@/server/effects/execute");
   const { registerDispatcher } = await import("@/server/effects/registry");
+  const { reviseEmailEffect } = await import("@/server/effects/revise");
+  const { buildSendDraft } = await import("@/server/providers/agentmail");
+  const { dispatchDueScheduledEffects } = await import("@/server/orchestration/wakes");
 
   let userId = "";
   let threadId = "";
@@ -37,6 +40,15 @@ d("exact-effect rail + wakes (real Postgres)", async () => {
         evidenceRefs: [],
         safeSummary: "sent",
       };
+    },
+  });
+
+  // Stand-in for AgentMail: records exactly what would be sent.
+  const mailSent: Record<string, unknown>[] = [];
+  registerDispatcher("agentmail.send_email", {
+    dispatch: async (e) => {
+      mailSent.push(e.canonicalArgs);
+      return { outcome: "succeeded", providerReceiptRef: `m_${e.id}`, providerRequestId: null, evidenceRefs: [], safeSummary: "sent" };
     },
   });
 
@@ -189,5 +201,76 @@ d("exact-effect rail + wakes (real Postgres)", async () => {
     await expect(
       decideApproval({ userId: other.id, effectId: p.effectId, decision: "approved", shownProposalHash: p.proposalHash }),
     ).rejects.toBeInstanceOf(ApprovalConflict);
+  });
+
+  it("a user edit supersedes the proposal: new hash executes, the original never can", async () => {
+    const r = await newResp();
+    const inbox = "august-test@agentmail.to";
+    const p = await prepareEffect({
+      userId,
+      responsibilityId: r.id,
+      workerSessionId: null,
+      draft: buildSendDraft({ to: "bob@example.com", subject: "Coffee?", text: "Free Thursday?" }, inbox),
+    });
+    expect(p.status).toBe("waiting_approval");
+
+    await expect(
+      reviseEmailEffect({
+        userId,
+        effectId: p.effectId,
+        shownProposalHash: "sha256:stale",
+        edit: { to: ["bob@example.com"], subject: "x", body: "y" },
+      }),
+    ).rejects.toBeInstanceOf(ApprovalConflict);
+
+    const edit = { to: ["Bob@Example.com"], subject: "Coffee Thursday?", body: "Free Thursday at 10?" };
+    const rev = await reviseEmailEffect({ userId, effectId: p.effectId, shownProposalHash: p.proposalHash, edit });
+    expect(rev.effectId).not.toBe(p.effectId);
+    expect(rev.proposalHash).not.toBe(p.proposalHash);
+
+    const { rows } = await query<{ id: string; status: string; review_reason: string | null; review_decision: string | null }>(
+      `select id, status, review_reason, review_decision from effect_proposals where id = any($1::uuid[])`,
+      [[p.effectId, rev.effectId]],
+    );
+    const orig = rows.find((x) => x.id === p.effectId)!;
+    const next = rows.find((x) => x.id === rev.effectId)!;
+    expect(orig).toMatchObject({ status: "denied", review_reason: "superseded_by_user_edit" });
+    expect(next).toMatchObject({ status: "authorized", review_decision: "user_authored" });
+
+    await expect(
+      decideApproval({ userId, effectId: p.effectId, decision: "approved", shownProposalHash: p.proposalHash }),
+    ).rejects.toBeInstanceOf(ApprovalConflict);
+    expect(await executeEffect(userId, p.effectId)).toBeNull();
+
+    const before = mailSent.length;
+    expect((await executeEffect(userId, rev.effectId))?.outcome).toBe("succeeded");
+    expect(await executeEffect(userId, rev.effectId)).toBeNull();
+    expect(mailSent.length - before).toBe(1);
+    expect(mailSent.at(-1)).toEqual({ fromInbox: inbox, to: ["bob@example.com"], subject: edit.subject, text: edit.body });
+  });
+
+  it("a scheduled effect is not dispatched before it is due, then exactly once", async () => {
+    const r = await newResp();
+    const p = await prepareEffect({ userId, responsibilityId: r.id, workerSessionId: null, draft: draft("erin@example.com") });
+    const sendAt = new Date(Date.now() + 3600_000).toISOString();
+    await decideApproval({ userId, effectId: p.effectId, decision: "approved", shownProposalHash: p.proposalHash, sendAt });
+    expect((await getResponsibility(userId, r.id))?.status).toBe("scheduled");
+
+    const resumed: string[] = [];
+    const resume = async (e: { effectId: string }) => void resumed.push(e.effectId);
+    const before = dispatchCount;
+    expect(await executeEffect(userId, p.effectId)).toBeNull();
+    expect(await dispatchDueScheduledEffects({ userId, resume })).toBe(0);
+    expect(dispatchCount).toBe(before);
+
+    await query(`update effect_proposals set scheduled_for = now() - interval '1 second' where id = $1`, [p.effectId]);
+    const [a, b] = await Promise.all([
+      dispatchDueScheduledEffects({ userId, resume }),
+      dispatchDueScheduledEffects({ userId, resume }),
+    ]);
+    expect(a + b).toBe(1);
+    expect(dispatchCount - before).toBe(1);
+    expect(resumed).toEqual([p.effectId]);
+    expect(await dispatchDueScheduledEffects({ userId, resume })).toBe(0);
   });
 });

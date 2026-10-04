@@ -34,6 +34,8 @@ export async function resetDemoUser(authSubject: string) {
     await del(`delete from responsibility_events where user_id = $1`);
     await del(`update messages set responsibility_id = null where user_id = $1`);
     await del(`delete from responsibilities where user_id = $1`);
+    // Long-term memories stay; only their link to a deleted message goes.
+    await del(`update memory_records set source_message_id = null where user_id = $1`);
     await del(`delete from messages where user_id = $1`);
     await del(`delete from threads where user_id = $1`);
   });

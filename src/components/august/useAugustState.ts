@@ -38,6 +38,13 @@ export type Connection =
 
 export type DecisionResult = { ok: true } | { ok: false; error: string };
 
+export type EmailEditInput = {
+  to: string[];
+  subject: string;
+  body: string;
+  sendAt?: string | null;
+};
+
 export type AugustStore = {
   state: AugustState | null;
   connection: Connection;
@@ -46,7 +53,12 @@ export type AugustStore = {
   decide: (
     approval: ApprovalView,
     decision: "approved" | "denied",
+    opts?: { sendAt?: string | null },
   ) => Promise<DecisionResult>;
+  /** Send the user's edited email (a new user-authored effect replaces the shown one). */
+  revise: (approval: ApprovalView, edit: EmailEditInput) => Promise<DecisionResult>;
+  cancelSchedule: (approval: ApprovalView) => Promise<DecisionResult>;
+  sendNow: (approval: ApprovalView) => Promise<DecisionResult>;
   cancel: (responsibilityId: string) => Promise<DecisionResult>;
   loadDetail: (responsibilityId: string) => Promise<ResponsibilityDetail | null>;
   wake: (responsibilityId: string) => Promise<DecisionResult>;
@@ -156,34 +168,96 @@ export function useAugustState(): AugustStore {
     };
   }, [mock, refresh]);
 
+  /** Mock mode only: settle an approval locally. */
+  const settleMock = useCallback(
+    (effectId: string, patch: Partial<ApprovalView>) =>
+      setMockData((prev) => {
+        const s = prev ?? mockState();
+        return {
+          ...s,
+          approvals: s.approvals.map((a) =>
+            a.effectId === effectId ? { ...a, decidedAt: new Date().toISOString(), ...patch } : a,
+          ),
+        };
+      }),
+    [],
+  );
+
   const decide = useCallback<AugustStore["decide"]>(
-    async (approval, decision) => {
+    async (approval, decision, opts) => {
       if (mockRef.current) {
-        setMockData((prev) => {
-          const s = prev ?? mockState();
-          return {
-            ...s,
-            approvals: s.approvals.map((a) =>
-              a.effectId === approval.effectId
-                ? {
-                    ...a,
-                    state: decision === "approved" ? "sent" : "declined",
-                    decidedAt: new Date().toISOString(),
-                  }
-                : a,
-            ),
-          };
+        settleMock(approval.effectId, {
+          state: decision === "denied" ? "declined" : opts?.sendAt ? "scheduled" : "sent",
+          scheduledFor: opts?.sendAt ?? null,
+          settledAt: opts?.sendAt ? null : new Date().toISOString(),
         });
         return { ok: true };
       }
       const result = await post(
         `/api/approvals/${encodeURIComponent(approval.effectId)}`,
-        { decision, proposalHash: approval.proposalHash },
+        { decision, proposalHash: approval.proposalHash, sendAt: opts?.sendAt ?? null },
       );
       void refresh();
       return result;
     },
-    [refresh],
+    [refresh, settleMock],
+  );
+
+  const revise = useCallback<AugustStore["revise"]>(
+    async (approval, edit) => {
+      if (mockRef.current) {
+        settleMock(approval.effectId, {
+          state: edit.sendAt ? "scheduled" : "sent",
+          scheduledFor: edit.sendAt ?? null,
+          settledAt: edit.sendAt ? null : new Date().toISOString(),
+          email: approval.email && { ...approval.email, to: edit.to, subject: edit.subject, body: edit.body },
+        });
+        return { ok: true };
+      }
+      const result = await post(
+        `/api/approvals/${encodeURIComponent(approval.effectId)}/revise`,
+        {
+          shownProposalHash: approval.proposalHash,
+          to: edit.to,
+          subject: edit.subject,
+          body: edit.body,
+          sendAt: edit.sendAt ?? null,
+        },
+      );
+      void refresh();
+      return result;
+    },
+    [refresh, settleMock],
+  );
+
+  const cancelSchedule = useCallback<AugustStore["cancelSchedule"]>(
+    async (approval) => {
+      if (mockRef.current) {
+        settleMock(approval.effectId, { state: "declined" });
+        return { ok: true };
+      }
+      const result = await post(
+        `/api/approvals/${encodeURIComponent(approval.effectId)}/cancel-schedule`,
+      );
+      void refresh();
+      return result;
+    },
+    [refresh, settleMock],
+  );
+
+  const sendNow = useCallback<AugustStore["sendNow"]>(
+    async (approval) => {
+      if (mockRef.current) {
+        settleMock(approval.effectId, { state: "sent", settledAt: new Date().toISOString() });
+        return { ok: true };
+      }
+      const result = await post(
+        `/api/approvals/${encodeURIComponent(approval.effectId)}/send-now`,
+      );
+      void refresh();
+      return result;
+    },
+    [refresh, settleMock],
   );
 
   const cancel = useCallback<AugustStore["cancel"]>(
@@ -237,12 +311,15 @@ export function useAugustState(): AugustStore {
       mock,
       refresh,
       decide,
+      revise,
+      cancelSchedule,
+      sendNow,
       cancel,
       loadDetail,
       wake,
       resetDemo,
     }),
-    [state, connection, mock, refresh, decide, cancel, loadDetail, wake, resetDemo],
+    [state, connection, mock, refresh, decide, revise, cancelSchedule, sendNow, cancel, loadDetail, wake, resetDemo],
   );
 }
 
@@ -331,8 +408,8 @@ function mockState(): AugustState {
         responsibilityId: "r-dinner",
         responsibilityTitle: "Dinner for two tonight",
         kind: "email",
-        headline: "August wants to send:",
-        effectClass: "irreversible",
+        title: "Email: Table for two tonight",
+        effectClass: "consequential",
         fields: [
           { label: "From", value: "august@agentmail.to" },
           { label: "To", value: "reservations@lula.example.com" },
@@ -340,12 +417,25 @@ function mockState(): AugustState {
         ],
         body:
           "Hi,\n\nDo you have any cancellations for two around 7 PM tonight? We're flexible between 6:30 and 8.\n\nThanks,\nCharlie",
+        email: {
+          from: "august@agentmail.to",
+          to: ["reservations@lula.example.com"],
+          cc: [],
+          subject: "Table for two tonight",
+          body:
+            "Hi,\n\nDo you have any cancellations for two around 7 PM tonight? We're flexible between 6:30 and 8.\n\nThanks,\nCharlie",
+          isReply: false,
+        },
+        editable: true,
         proposalHash: "mock-hash-1",
         question: null,
         createdAt: minutesFromNow(-2),
         state: "pending",
+        scheduledFor: null,
         decidedAt: null,
         settledAt: null,
+        supersededBy: null,
+        supersedes: null,
       },
     ],
     activity: [

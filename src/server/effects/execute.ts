@@ -29,7 +29,8 @@ export class EffectIntegrityError extends Error {}
 /**
  * Execute an authorized effect exactly once.
  * - Claims the dispatch transactionally (authorized -> dispatching); a second
- *   caller gets null and does nothing.
+ *   caller gets null and does nothing. A scheduled effect is not claimable
+ *   before its scheduled_for time.
  * - Recomputes the proposal hash from the stored canonical payload; any drift blocks.
  * - If review required confirmation, requires an approval row bound to this exact hash.
  * - A thrown adapter error after dispatch began is "uncertain", never "failed",
@@ -38,12 +39,15 @@ export class EffectIntegrityError extends Error {}
 export async function executeEffect(userId: string, effectId: string): Promise<DispatchResult | null> {
   let integrityFailure = false;
   const claimed = await tx(async (c) => {
-    const { rows } = await c.query<EffectRow>(
-      `select * from effect_proposals where user_id = $1 and id = $2 for update`,
+    const { rows } = await c.query<EffectRow & { not_yet_due: boolean }>(
+      `select *, coalesce(scheduled_for > now(), false) as not_yet_due
+         from effect_proposals where user_id = $1 and id = $2 for update`,
       [userId, effectId],
     );
     const e = rows[0];
     if (!e || e.status !== "authorized") return null;
+    // Send later: never dispatch before the time the user chose.
+    if (e.not_yet_due) return null;
 
     const recomputed = proposalHash({
       provider: e.provider,

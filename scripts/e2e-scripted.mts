@@ -149,7 +149,7 @@ check("email parked for approval", after2?.status === "waiting_user" && Boolean(
 const approvals = await pendingApprovals(user.id);
 check("approval card rendered from frozen proposal", approvals.length === 1);
 const card = approvals[0] ? toApprovalView(approvals[0]) : null;
-if (card) console.log("      card:", card.headline, card.fields.map((f) => `${f.label}=${f.value}`).join(" | "));
+if (card) console.log("      card:", card.title, card.fields.map((f) => `${f.label}=${f.value}`).join(" | "));
 
 if (card && LIVE_SEND) {
   await decideApproval({ userId: user.id, effectId: card.effectId, decision: "approved", shownProposalHash: card.proposalHash });
