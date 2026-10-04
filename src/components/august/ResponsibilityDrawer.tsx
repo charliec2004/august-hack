@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import {
+  ChevronRightIcon,
   LoaderCircleIcon,
   MonitorPlayIcon,
   XIcon,
@@ -10,17 +11,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type {
-  ActivityItem,
   ResponsibilityDetail,
   ResponsibilityView,
 } from "@/server/types/api";
-import { ActivityList } from "./ActivityFeed";
 import { WakeButton } from "./DemoControls";
-import { EvidenceList } from "./EvidenceList";
+import { MarkdownBlock } from "./MarkdownBlock";
+import { MomentsTimeline } from "./MomentsTimeline";
+import { SourcesSection } from "./SourcesSection";
 import {
   formatWhen,
-  humanizeKey,
-  humanizeValue,
   isFinished,
 } from "./format";
 import { useAugust } from "./useAugustState";
@@ -69,9 +68,6 @@ export function ResponsibilityDrawer({
   // Detail from a previously opened item is never shown for this one.
   const d = detail && detail.id === responsibilityId ? detail : null;
   const loadFailed = failedId !== null && failedId === responsibilityId;
-  const activity = (state?.activity ?? []).filter(
-    (a) => a.responsibilityId === responsibilityId,
-  );
 
   return (
     <DialogPrimitive.Root
@@ -86,7 +82,6 @@ export function ResponsibilityDrawer({
               view={view}
               detail={d}
               loadFailed={loadFailed}
-              activity={activity}
               demoControls={state?.demoControls ?? false}
               onWatch={() => onWatch(view.id)}
               onClose={onClose}
@@ -106,7 +101,6 @@ function DrawerBody({
   view,
   detail,
   loadFailed,
-  activity,
   demoControls,
   onWatch,
   onClose,
@@ -114,30 +108,16 @@ function DrawerBody({
   view: ResponsibilityView;
   detail: ResponsibilityDetail | null;
   loadFailed: boolean;
-  activity: ActivityItem[];
   demoControls: boolean;
   onWatch: () => void;
   onClose: () => void;
 }) {
   const finished = isFinished(view);
   const needsYou = view.humanStatus === "Needs you";
-  const constraints = detail
-    ? Object.entries(detail.constraints ?? {}).filter(
-        ([, v]) => v != null && v !== "",
-      )
-    : [];
-  const timeline = detail
-    ? [...detail.timeline].sort(
-        (a, b) => new Date(b.at).getTime() - new Date(a.at).getTime(),
-      )
-    : [];
-  const recentActivity = [...activity]
-    .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
-    .slice(-8);
 
   return (
     <>
-      <header className="flex items-start gap-3 border-b px-6 pt-5 pb-4">
+      <header className="flex items-start gap-3 px-6 pt-6 pb-2">
         <div className="min-w-0 flex-1">
           <DialogPrimitive.Title className="font-heading text-xl leading-tight font-medium tracking-tight">
             {view.title}
@@ -154,6 +134,11 @@ function DrawerBody({
               </span>
             )}
             {view.humanStatus}
+            {!finished && view.nextWakeAt && (
+              <span className="text-muted-foreground/80 font-normal">
+                · next check {formatWhen(view.nextWakeAt)}
+              </span>
+            )}
           </DialogPrimitive.Description>
         </div>
         <DialogPrimitive.Close render={<Button variant="ghost" size="icon-sm" />}>
@@ -162,41 +147,32 @@ function DrawerBody({
         </DialogPrimitive.Close>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-6 py-5">
-        <div className="flex flex-col gap-6">
-          {(view.nextWakeAt || view.waitingOn || detail?.nextAction) &&
-            !finished && (
-              <div className="bg-muted/60 rounded-xl px-4 py-3 text-sm">
-                {view.waitingOn && (
-                  <p>
-                    <span className="text-muted-foreground">Waiting on </span>
-                    {view.waitingOn}
-                  </p>
-                )}
-                {detail?.nextAction && (
-                  <p className={cn(view.waitingOn && "mt-1")}>
-                    <span className="text-muted-foreground">Next: </span>
-                    {detail.nextAction}
-                  </p>
-                )}
-                {view.nextWakeAt && (
-                  <p className="text-muted-foreground mt-1">
-                    Next check {formatWhen(view.nextWakeAt)}
-                  </p>
-                )}
-              </div>
+      <div className="flex-1 overflow-y-auto px-6 pt-3 pb-8">
+        <div className="flex flex-col gap-9">
+          <div className="flex flex-col gap-4">
+            {detail?.standing ? (
+              <MarkdownBlock className="text-foreground text-[15px]">{detail.standing}</MarkdownBlock>
+            ) : detail ? (
+              <p className="text-foreground/85 text-[15px] leading-relaxed">
+                {standingFallback(view, detail)}
+              </p>
+            ) : null}
+            {detail && detail.facts.length > 0 && (
+              <ul className="flex flex-wrap gap-1.5" aria-label="Key facts">
+                {detail.facts.map((f) => (
+                  <li key={f} className="bg-muted/70 text-muted-foreground rounded-full px-2.5 py-0.5 text-xs">
+                    {f}
+                  </li>
+                ))}
+              </ul>
             )}
-
-          {view.liveViewUrl && (
-            <Button
-              variant="outline"
-              className="self-start rounded-full"
-              onClick={onWatch}
-            >
-              <MonitorPlayIcon />
-              Watch browser
-            </Button>
-          )}
+            {view.liveViewUrl && (
+              <Button variant="outline" className="self-start rounded-full" onClick={onWatch}>
+                <MonitorPlayIcon />
+                Watch browser
+              </Button>
+            )}
+          </div>
 
           {!detail && !loadFailed && <DetailSkeleton />}
           {!detail && loadFailed && (
@@ -205,69 +181,20 @@ function DrawerBody({
             </p>
           )}
 
-          {detail?.goal && (
-            <Section title="Goal">
-              <p className="text-[15px] leading-relaxed">{detail.goal}</p>
-            </Section>
-          )}
-
-          {detail && detail.successCriteria.length > 0 && (
-            <Section title="Done when">
-              <ul className="flex flex-col gap-1.5 text-sm leading-relaxed">
-                {detail.successCriteria.map((c, i) => (
-                  <li key={i} className="flex gap-2.5">
-                    <span className="bg-foreground/30 mt-2 size-1 shrink-0 rounded-full" />
-                    {c}
-                  </li>
-                ))}
-              </ul>
-            </Section>
-          )}
-
-          {constraints.length > 0 && (
-            <Section title="Constraints">
-              <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-sm">
-                {constraints.map(([k, v]) => (
-                  <div key={k} className="contents">
-                    <dt className="text-muted-foreground">{humanizeKey(k)}</dt>
-                    <dd className="min-w-0 break-words">{humanizeValue(v)}</dd>
-                  </div>
-                ))}
-              </dl>
-            </Section>
-          )}
-
-          {recentActivity.length > 0 && (
-            <Section title="Recent activity">
-              <div className="-ml-3">
-                <ActivityList items={recentActivity} />
-              </div>
-            </Section>
-          )}
-
-          {timeline.length > 0 && (
+          {detail && detail.moments.length > 0 && (
             <Section title="Timeline">
-              <ol className="border-border relative ml-1 flex flex-col gap-3 border-l pl-4">
-                {timeline.map((e) => (
-                  <li key={e.id} className="relative text-sm leading-snug">
-                    <span className="bg-background border-foreground/30 absolute top-1.5 -left-[21px] size-2 rounded-full border" />
-                    <p>{e.text}</p>
-                    <time
-                      dateTime={e.at}
-                      className="text-muted-foreground text-xs"
-                    >
-                      {formatWhen(e.at)}
-                    </time>
-                  </li>
-                ))}
-              </ol>
+              <MomentsTimeline moments={detail.moments} />
             </Section>
           )}
 
-          {detail && detail.evidence.length > 0 && (
-            <Section title="What August found">
-              <EvidenceList evidence={detail.evidence} />
+          {detail && detail.sources.length > 0 && (
+            <Section title="Sources">
+              <SourcesSection groups={detail.sources} />
             </Section>
+          )}
+
+          {detail && (detail.goal || detail.successCriteria.length > 0) && (
+            <Details detail={detail} />
           )}
         </div>
       </div>
@@ -279,6 +206,53 @@ function DrawerBody({
         </footer>
       )}
     </>
+  );
+}
+
+function standingFallback(view: ResponsibilityView, detail: ResponsibilityDetail): string {
+  if (view.waitingOn && !isFinished(view)) return `${view.humanStatus}: waiting on ${view.waitingOn}.`;
+  if (detail.nextAction && !isFinished(view)) return `${view.humanStatus}. Next: ${detail.nextAction}`;
+  return `${view.humanStatus}.`;
+}
+
+/** Goal and "Done when", tucked away by default. */
+function Details({ detail }: { detail: ResponsibilityDetail }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs transition-colors"
+      >
+        <ChevronRightIcon className={cn("size-3.5 transition-transform", open && "rotate-90")} />
+        Details
+      </button>
+      {open && (
+        <div className="animate-in fade-in mt-3 flex flex-col gap-4 text-sm leading-relaxed duration-200">
+          {detail.goal && (
+            <div>
+              <p className="text-muted-foreground mb-1 text-xs">Goal</p>
+              <p className="text-foreground/85">{detail.goal}</p>
+            </div>
+          )}
+          {detail.successCriteria.length > 0 && (
+            <div>
+              <p className="text-muted-foreground mb-1 text-xs">Done when</p>
+              <ul className="flex flex-col gap-1">
+                {detail.successCriteria.map((c, i) => (
+                  <li key={i} className="text-foreground/85 flex gap-2.5">
+                    <span className="bg-foreground/30 mt-2 size-1 shrink-0 rounded-full" />
+                    {c}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 

@@ -1,19 +1,18 @@
 import "server-only";
 
-import { activeRunsFor } from "@/server/db/workers";
+import { liveBrowserSessions } from "@/server/browser/sessions";
 import type { LiveBrowser } from "@/server/types/api";
 
 /**
- * Browser sessions that are live right now: the only source of live-view links
- * the UI may show. Trace rows' frozen `liveViewUrl` is never used.
- *
- * Derived from running worker runs with an unexpired lease (live_view_url is
- * cleared when a run finishes). When `browser_sessions` lands, swap this for
- * `liveBrowserSessions(userId)` (status = 'live').
+ * Browser sessions that are live right now (browser_sessions.status = 'live'):
+ * the only source of live-view links the UI may show. A trace row's frozen
+ * `liveViewUrl` is never used.
  */
 export async function liveBrowsersFor(userId: string): Promise<LiveBrowser[]> {
-  const runs = await activeRunsFor(userId);
-  return runs
-    .filter((r) => r.live_view_url)
-    .map((r) => ({ sessionId: r.id, responsibilityId: r.responsibility_id, liveViewUrl: r.live_view_url! }));
+  const sessions = await liveBrowserSessions(userId);
+  return sessions.map((s) => ({
+    sessionId: s.sessionId,
+    responsibilityId: s.responsibilityId,
+    liveViewUrl: s.liveViewUrl,
+  }));
 }

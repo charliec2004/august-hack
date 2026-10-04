@@ -30,29 +30,43 @@ export type ResponsibilityView = {
   updatedAt: string;
 };
 
-export type TimelineEvent = {
+/** One moment in a responsibility's history. `key` moments show by default. */
+export type DetailMoment = {
   id: string;
   at: string;
-  kind: string;
   text: string;
+  key: boolean;
+  /** Consecutive identical lines collapse into one with a count. */
+  count: number;
 };
 
-export type EvidenceView = {
+export type SourceItem = {
   id: string;
-  provider: string;
   title: string;
   url: string | null;
+  /** Clipped markdown summary. */
   summary: string;
   observedAt: string;
 };
 
+/** Sources grouped by domain (web pages) or connector ("Web search", "Email"). */
+export type SourceGroup = {
+  key: string;
+  label: string;
+  items: SourceItem[];
+};
+
 export type ResponsibilityDetail = ResponsibilityView & {
+  /** Where it stands, in August's own words (its latest message about this). */
+  standing: string | null;
+  standingAt: string | null;
+  /** Short humanized constraint tags, e.g. "Party of 2", "Under $120". */
+  facts: string[];
   goal: string;
   successCriteria: string[];
-  constraints: Record<string, unknown>;
   nextAction: string | null;
-  timeline: TimelineEvent[];
-  evidence: EvidenceView[];
+  moments: DetailMoment[];
+  sources: SourceGroup[];
 };
 
 /** One labeled material field on an approval card. */

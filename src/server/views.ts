@@ -2,6 +2,7 @@ import "server-only";
 
 import { listActivity, timelineVersion } from "@/server/activity";
 import { query } from "@/server/db/client";
+import { factsFrom, momentsFrom, sourcesFrom, standingFor } from "@/server/detail";
 import { recentUserFacingEffects } from "@/server/db/effects";
 import { listEvidence } from "@/server/db/evidence";
 import {
@@ -101,28 +102,24 @@ export async function buildState(userId: string): Promise<AugustState> {
 export async function buildDetail(userId: string, id: string): Promise<ResponsibilityDetail | null> {
   const r = await getResponsibility(userId, id);
   if (!r) return null;
-  const [runs, live, events, evidence] = await Promise.all([
+  const [runs, live, events, evidence, activity, standing, tz] = await Promise.all([
     activeSet(userId),
     liveBrowsersFor(userId),
     listEvents(userId, id),
     listEvidence(userId, id),
+    listActivity(userId, { responsibilityId: id, limit: 200 }),
+    standingFor(userId, id),
+    query<{ timezone: string }>(`select timezone from app_users where id = $1`, [userId]),
   ]);
   return {
     ...toView(r, runs, live),
+    standing: standing?.text ?? null,
+    standingAt: standing?.at ?? null,
+    facts: factsFrom(r.constraints),
     goal: r.goal,
     successCriteria: r.success_criteria,
-    constraints: r.constraints,
     nextAction: r.next_action,
-    timeline: events
-      .filter((e) => e.safe_detail?.text)
-      .map((e) => ({ id: e.id, at: e.created_at.toISOString(), kind: e.event_kind, text: e.safe_detail.text! })),
-    evidence: evidence.map((ev) => ({
-      id: ev.id,
-      provider: ev.provider,
-      title: ev.safe_summary.split("\n")[0].replace(/^[#>*\-\s]+|[*_`]+/g, "").slice(0, 140),
-      url: ev.source_url,
-      summary: ev.safe_summary.slice(0, 2000),
-      observedAt: ev.observed_at.toISOString(),
-    })),
+    moments: momentsFrom({ events, activity, tz: tz.rows[0]?.timezone ?? "UTC" }),
+    sources: sourcesFrom(evidence),
   };
 }

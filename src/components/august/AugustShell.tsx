@@ -12,12 +12,6 @@ import {
   type ThreadComponents,
 } from "@/components/assistant-ui/elements/thread.aui";
 import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
 import type { LiveBrowser } from "@/server/types/api";
 import { BrowserLiveView, type LiveViewTarget } from "./BrowserLiveView";
 import { DemoControls } from "./DemoControls";
@@ -195,39 +189,13 @@ export function AugustShell() {
 
 /* ------------------------------------------------------------------------- */
 
-const CONNECTION_COPY: Record<Connection, { label: string; tone: string }> = {
-  connecting: { label: "Connecting", tone: "bg-muted-foreground/40" },
-  live: { label: "Connected", tone: "bg-live" },
-  unavailable: { label: "Getting ready", tone: "bg-muted-foreground/40" },
-  reconnecting: { label: "Reconnecting", tone: "bg-attention" },
-};
-
+/** No status dot; only a quiet word while the connection is being restored. */
 function ConnectionIndicator({ connection }: { connection: Connection }) {
-  const { label, tone } = CONNECTION_COPY[connection];
+  if (connection !== "reconnecting") return null;
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <span
-            role="status"
-            aria-label={label}
-            className="flex items-center gap-1.5 rounded-full px-1.5 py-1"
-          />
-        }
-      >
-        <span
-          className={cn(
-            "size-1.5 rounded-full transition-colors duration-500",
-            tone,
-            connection === "reconnecting" && "animate-pulse",
-          )}
-        />
-        {connection === "reconnecting" && (
-          <span className="text-muted-foreground text-xs">{label}</span>
-        )}
-      </TooltipTrigger>
-      <TooltipContent side="bottom">{label}</TooltipContent>
-    </Tooltip>
+    <span role="status" className="text-muted-foreground animate-pulse text-xs">
+      Reconnecting
+    </span>
   );
 }
 

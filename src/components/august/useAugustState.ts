@@ -370,21 +370,29 @@ function mockDetail(id: string): ResponsibilityDetail | null {
       "A confirmed reservation between 6:30 and 8 PM",
       "Within a 15 minute walk",
     ],
-    constraints: { partySize: 2, budget: "Under $120", "dietary needs": "One vegetarian" },
+    standing:
+      "Lula is fully booked between 6:30 and 8:30, so I asked them about cancellations. I'll check again at 4 PM.",
+    standingAt: minutesFromNow(-2),
+    facts: ["Tonight", "7:00 PM", "Party of 2", "Under $120"],
     nextAction: "Wait for Lula to reply, then check again at 4 PM.",
-    timeline: [
-      { id: "t1", at: minutesFromNow(-15), kind: "created", text: "You asked August to find dinner" },
-      { id: "t2", at: minutesFromNow(-12), kind: "checked", text: "Checked 5 restaurants" },
-      { id: "t3", at: minutesFromNow(-2), kind: "approval", text: "Asked you before emailing Lula" },
+    moments: [
+      { id: "t1", at: minutesFromNow(-15), text: "Took on: Dinner for two tonight", key: true, count: 1 },
+      { id: "t2", at: minutesFromNow(-12), text: "Searched the web", key: false, count: 3 },
+      { id: "t3", at: minutesFromNow(-2), text: "Needs your approval", key: true, count: 1 },
     ],
-    evidence: [
+    sources: [
       {
-        id: "ev1",
-        provider: "web",
-        title: "Lula Osteria: reservations",
-        url: "https://lula.example.com/reserve",
-        summary: "Fully booked 6–8:30 PM; cancellations by email.",
-        observedAt: minutesFromNow(-12),
+        key: "lula.example.com",
+        label: "lula.example.com",
+        items: [
+          {
+            id: "ev1",
+            title: "Lula Osteria: reservations",
+            url: "https://lula.example.com/reserve",
+            summary: "Fully booked 6 to 8:30 PM; cancellations by email.",
+            observedAt: minutesFromNow(-12),
+          },
+        ],
       },
     ],
   };

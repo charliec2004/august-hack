@@ -19,14 +19,15 @@ type TraceRow = {
  */
 export async function listActivity(
   userId: string,
-  opts: { since?: Date | null; limit: number },
+  opts: { since?: Date | null; responsibilityId?: string | null; limit: number },
 ): Promise<ActivityItem[]> {
   const { rows } = await query<TraceRow>(
     `select id::text, created_at, responsibility_id, safe_detail from trace_events
       where user_id = $1 and coalesce(safe_detail->>'text','') <> ''
         and ($2::timestamptz is null or created_at >= $2)
+        and ($4::uuid is null or responsibility_id = $4)
       order by created_at desc, id desc limit $3`,
-    [userId, opts.since ?? null, opts.limit],
+    [userId, opts.since ?? null, opts.limit, opts.responsibilityId ?? null],
   );
   return rows
     .reverse()

@@ -18,21 +18,13 @@ export const ShellActionsContext = createContext<ShellActions>({
 export const useShellActions = () => useContext(ShellActionsContext);
 
 /**
- * The live browser an activity line may offer to watch: its own session if
- * that is live, or, for lines without a session id, the responsibility's live
- * browser on its newest line only. Never a frozen URL from the trace.
+ * The live browser an activity line may offer to watch: only the line's own
+ * browser session, and only while it is live. Never a frozen URL from a trace.
  */
 export function liveBrowserForLine(
   state: AugustState | null,
-  line: { id: string; responsibilityId: string | null; browserSessionId: string | null },
+  line: { browserSessionId: string | null },
 ): LiveBrowser | null {
-  if (!state) return null;
-  if (line.browserSessionId) {
-    return state.liveBrowsers.find((b) => b.sessionId === line.browserSessionId) ?? null;
-  }
-  if (!line.responsibilityId) return null;
-  const browser = state.liveBrowsers.find((b) => b.responsibilityId === line.responsibilityId);
-  if (!browser) return null;
-  const newest = state.activity.findLast((a) => a.responsibilityId === line.responsibilityId);
-  return newest?.id === line.id ? browser : null;
+  if (!state || !line.browserSessionId) return null;
+  return state.liveBrowsers.find((b) => b.sessionId === line.browserSessionId) ?? null;
 }
