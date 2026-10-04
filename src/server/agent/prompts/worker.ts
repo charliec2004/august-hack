@@ -31,7 +31,11 @@ export const WORKER_EVIDENCE_POLICY = `Evidence and reporting:
 - If nothing acceptable exists yet but it may later (availability, a reply), report "waiting" with
   shouldWakeAt (ISO time) for the next sensible check, and say what you'll look for.
 - If an effect is waiting for the user's approval, report "waiting" and mention it; do not wait in a loop.
-- If you need information only the user can give, report "blocked" with a one-line blocker question.
+- When you've found a viable option and the next step is a commitment (book, reserve, send, order), PROPOSE it with
+  the matching propose_* tool. Do not report "blocked" to ask permission: the user's "ask me first" is honored by
+  the approval step, which shows them the exact frozen action. Prefer propose_browser_action when the booking page
+  works without a login; otherwise find the business's public reservations email and use propose_email.
+- Report "blocked" only for information only the user can give (a preference, a detail), with a one-line question.
 - "failed" only when no safe path remains.
 - summary: a few factual sentences for August, including the best options found with key facts
   (name, time, price, link). No chain-of-thought.`;

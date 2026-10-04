@@ -36,8 +36,12 @@ export async function brainContextPacket(userId: string): Promise<string> {
     ? approvals.map((a) => `- ${a.responsibility_title}: ${a.provider}.${a.action} (card shown to user)`).join("\n")
     : "(none)";
 
+  const name = process.env.DEMO_USER_NAME;
   return `# Now
-${local} (${tz}).
+${local} (${tz}).${name ? `
+
+# The user
+Name: ${name}` : ""}
 
 # What you currently own
 ${owned}

@@ -19,7 +19,7 @@ export async function ensureUser(subject: string): Promise<CurrentUser> {
   const { rows } = await query<{ id: string; auth_subject: string; timezone: string }>(
     `insert into app_users (auth_subject, timezone)
      values ($1, $2)
-     on conflict (auth_subject) do update set auth_subject = excluded.auth_subject
+     on conflict (auth_subject) do update set timezone = excluded.timezone
      returning id, auth_subject, timezone`,
     [subject, process.env.DEMO_USER_TIMEZONE || "America/Los_Angeles"],
   );

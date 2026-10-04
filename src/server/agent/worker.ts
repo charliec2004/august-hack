@@ -1,6 +1,7 @@
 import "server-only";
 
 import { Agent } from "@mastra/core/agent";
+import { query } from "@/server/db/client";
 import type { ResponsibilityRow } from "@/server/db/responsibilities";
 import type { WorkerSessionRow } from "@/server/db/workers";
 import type { WorkerReport } from "@/server/types/domain";
@@ -40,7 +41,8 @@ function workerPrompt(input: WorkerRunInput, tz: string): string {
   const r = input.responsibility;
   const now = new Date().toLocaleString("en-US", { timeZone: tz, dateStyle: "full", timeStyle: "short" });
   return `# Now
-${now} (${tz}). ISO now: ${new Date().toISOString()}
+${now}, user's local time zone ${tz}. Interpret all times the user gives in this time zone.
+${process.env.DEMO_USER_NAME ? `The user's name is ${process.env.DEMO_USER_NAME}; sign outside messages as August, assistant to ${process.env.DEMO_USER_NAME}.` : ""}
 
 # Assignment
 Title: ${r.title}
@@ -66,7 +68,8 @@ Do the work, then call "report" exactly once.`;
 }
 
 export async function runWorkerAgent(input: WorkerRunInput): Promise<WorkerReport> {
-  const tz = (input.responsibility.constraints?.timezone as string) || process.env.DEMO_USER_TIMEZONE || "America/Los_Angeles";
+  const { rows } = await query<{ timezone: string }>(`select timezone from app_users where id = $1`, [input.userId]);
+  const tz = rows[0]?.timezone ?? "America/Los_Angeles";
   let report: WorkerReport | null = null;
   const ctx: WorkerToolContext = {
     userId: input.userId,
