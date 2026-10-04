@@ -31,6 +31,7 @@ export function ResponsibilityRow({
         className={cn(
           "hover:bg-sidebar-accent focus-visible:ring-ring/50 w-full rounded-lg px-3 py-2 text-left transition-colors outline-none focus-visible:ring-2",
           selected && "bg-sidebar-accent",
+          r.liveViewUrl && "pr-24",
         )}
       >
         <div className="flex items-center gap-2.5" title={r.humanStatus}>
@@ -48,10 +49,12 @@ export function ResponsibilityRow({
         <button
           type="button"
           onClick={onWatch}
-          className="text-muted-foreground hover:text-foreground hover:bg-background/80 focus-visible:ring-ring/50 mb-1 ml-[1.9rem] inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs transition-colors outline-none focus-visible:ring-2"
+          title="Watch the browser"
+          className="bg-background text-foreground/80 hover:text-foreground focus-visible:ring-ring/50 absolute top-1/2 right-2 inline-flex -translate-y-1/2 items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs transition-colors outline-none focus-visible:ring-2"
         >
+          <span className="bg-live size-1.5 rounded-full" aria-hidden />
           <MonitorPlayIcon className="size-3.5" />
-          Watch browser
+          Watch
         </button>
       )}
     </li>
@@ -94,7 +97,7 @@ function SkipWait({ responsibilityId }: { responsibilityId: string }) {
         await wake(responsibilityId);
         setBusy(false);
       }}
-      className="text-muted-foreground hover:text-foreground hover:bg-background/80 absolute top-1.5 right-2 rounded-md p-1 opacity-0 transition group-hover/row:opacity-100 focus-visible:opacity-100"
+      className="text-muted-foreground hover:text-foreground hover:bg-background/80 absolute top-1/2 right-2 -translate-y-1/2 rounded-md p-1 opacity-0 transition group-hover/row:opacity-100 focus-visible:opacity-100"
     >
       {busy ? <LoaderCircleIcon className="size-3.5 animate-spin" /> : <FastForwardIcon className="size-3.5" />}
     </button>
