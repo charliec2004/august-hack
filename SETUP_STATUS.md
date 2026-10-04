@@ -4,7 +4,7 @@ Non-secret identifiers only. Secrets live in `.env.local` (gitignored, mode 600)
 provider credential stores. Never paste token values here.
 
 ## Repository
-- status: READY (local); GitHub remote: pending
+- status: READY — public repo https://github.com/charliec2004/august-hack (default branch `main`)
 - branch: `t3code/end-to-end-agent-handoff`
 
 ## Neon
