@@ -7,6 +7,7 @@ import type { WorkerSessionRow } from "@/server/db/workers";
 import type { WorkerReport } from "@/server/types/domain";
 import { gatewayProviderOptions, modelFor } from "./model";
 import { workerSystemPrompt } from "./prompts/worker";
+import { closeRunBrowser } from "@/server/browser/runBrowser";
 import { workerTools, type WorkerToolContext } from "./workerTools";
 
 export type WorkerRunInput = {
@@ -90,11 +91,17 @@ export async function runWorkerAgent(input: WorkerRunInput): Promise<WorkerRepor
     model: modelFor("worker"),
     tools: workerTools(ctx),
   });
-  const out = await agent.generate(workerPrompt(input, tz), {
-    maxSteps: MAX_STEPS,
-    providerOptions: gatewayProviderOptions,
-    abortSignal: AbortSignal.timeout(3 * 60_000),
-  });
+  let out;
+  try {
+    out = await agent.generate(workerPrompt(input, tz), {
+      maxSteps: MAX_STEPS,
+      providerOptions: gatewayProviderOptions,
+      abortSignal: AbortSignal.timeout(3 * 60_000),
+    });
+  } finally {
+    // The run's browser lives exactly as long as the run.
+    await closeRunBrowser(input.runId).catch(() => {});
+  }
   if (report) return report;
   // No report: treat as unfinished, never as completion.
   return {

@@ -1,9 +1,9 @@
 import "server-only";
 
-import Kernel from "@onkernel/sdk";
-
+import { closeBrowserSession, openBrowserSession } from "@/server/browser/sessions";
 import { recordEvidence } from "@/server/db/evidence";
 import { trace } from "@/server/db/traces";
+import { kernel } from "./kernelClient";
 import type { AuthorizedEffect, DispatchResult, EffectDraft } from "@/server/effects/types";
 import type { ToolResult } from "@/server/types/domain";
 
@@ -12,10 +12,10 @@ import type { ToolResult } from "@/server/types/domain";
  *
  * Uses Kernel's server-side Playwright execution
  * (`kernel.browsers.playwright.execute(sessionId, { code })`), so no local
- * Playwright/CDP dependency is needed. Every session is short-lived and is
- * ALWAYS deleted in `finally`. The live view URL comes from the create
- * response field `browser_live_view_url` and is handed to `onLiveView(url)`;
- * it is short-lived UI metadata, never persisted as evidence.
+ * Playwright/CDP dependency is needed. Every session here is short-lived, is
+ * owned by a browser_sessions row (src/server/browser/sessions.ts), and is
+ * ALWAYS deleted + closed in `finally`. The interactive live view URL lives on
+ * that row while it is live; traces carry only `browserSessionId`.
  *
  * All page text is untrusted content: it is bounded and returned as data, and
  * nothing on a page can widen scope or grant permission.
@@ -147,16 +147,6 @@ export function defaultCommitText(action: string): string {
 // Session lifecycle
 // ---------------------------------------------------------------------------
 
-let client: Kernel | null = null;
-function kernel(): Kernel {
-  if (!client) {
-    const apiKey = process.env.KERNEL_API_KEY;
-    if (!apiKey) throw new Error("KERNEL_API_KEY is not set");
-    client = new Kernel({ apiKey });
-  }
-  return client;
-}
-
 async function safeTrace(t: Parameters<typeof trace>[0]) {
   try {
     await trace(t);
@@ -165,32 +155,48 @@ async function safeTrace(t: Parameters<typeof trace>[0]) {
   }
 }
 
-type Session = { id: string; liveViewUrl: string | null };
+type Session = { id: string; browserSessionId: string; liveViewUrl: string | null };
 
 /** Receives the live view URL when a session starts (short-lived UI metadata). */
 export type LiveViewCallback = (url: string) => void | Promise<void>;
 
-async function withSession<T>(
-  onLiveView: LiveViewCallback | undefined,
-  fn: (s: Session) => Promise<T>,
-): Promise<T> {
-  const created = await kernel().browsers.create({ headless: false, timeout_seconds: SESSION_TIMEOUT_S });
-  const session: Session = { id: created.session_id, liveViewUrl: created.browser_live_view_url ?? null };
+type SessionOwner = {
+  userId: string;
+  responsibilityId: string | null;
+  workerRunId?: string | null;
+  onLiveView?: LiveViewCallback;
+  /** Load the user's saved sign-ins (persistent profile) with stealth + CAPTCHA solving. */
+  signedIn?: boolean;
+};
+
+/**
+ * One-shot session owned by browser_sessions: opened as a lifecycle row, ALWAYS
+ * deleted and closed in `finally`.
+ */
+async function withSession<T>(owner: SessionOwner, fn: (s: Session) => Promise<T>): Promise<T> {
+  const opened = await openBrowserSession({
+    userId: owner.userId,
+    responsibilityId: owner.responsibilityId,
+    workerRunId: owner.workerRunId ?? null,
+    kind: "task",
+    timeoutSeconds: SESSION_TIMEOUT_S,
+    withProfile: owner.signedIn,
+    stealth: owner.signedIn,
+  });
+  const session: Session = { id: opened.kernelSessionId, browserSessionId: opened.id, liveViewUrl: opened.liveViewUrl };
   try {
-    if (session.liveViewUrl && onLiveView) {
+    if (session.liveViewUrl && owner.onLiveView) {
       try {
-        await onLiveView(session.liveViewUrl);
+        await owner.onLiveView(session.liveViewUrl);
       } catch {
         // UI callback must never break the browser task.
       }
     }
     return await fn(session);
   } finally {
-    await kernel()
-      .browsers.deleteByID(session.id)
-      .catch(() => {
-        // Kernel also enforces timeout_seconds; nothing more we can do here.
-      });
+    await closeBrowserSession(opened.id, "released").catch(() => {
+      // reconcileBrowserSessions closes it later.
+    });
   }
 }
 
@@ -218,6 +224,7 @@ export async function browserRead(args: {
   responsibilityId: string | null;
   url: string;
   instruction?: string;
+  workerRunId?: string | null;
   onLiveView?: LiveViewCallback;
   activityText?: string;
 }): Promise<ToolResult<BrowserReadData>> {
@@ -231,12 +238,12 @@ export async function browserRead(args: {
   const activity = args.activityText ?? `Checked ${host}`;
 
   try {
-    return await withSession(args.onLiveView, async (session) => {
+    return await withSession({ userId, responsibilityId, workerRunId: args.workerRunId, onLiveView: args.onLiveView }, async (session) => {
       await safeTrace({
         userId,
         responsibilityId,
         kind: "tool.started",
-        detail: { text: `Opening ${host}`, provider: "kernel", liveViewUrl: session.liveViewUrl },
+        detail: { text: `Opening ${host}`, provider: "kernel", browserSessionId: session.browserSessionId },
       });
       const page = await runPlaywright<{ title: string; finalUrl: string; text: string }>(
         session.id,
@@ -309,11 +316,12 @@ export type PrepareCommitInput = {
   expectedFacts?: Record<string, unknown>;
   confirmationSelector?: string;
   instruction?: string;
+  workerRunId?: string | null;
   onLiveView?: LiveViewCallback;
 };
 
 /** Pure: frozen commit args from a prepare request (exported for tests). */
-export function buildCommitArgs(input: Omit<PrepareCommitInput, "userId" | "responsibilityId" | "onLiveView">): BrowserCommitArgs {
+export function buildCommitArgs(input: Omit<PrepareCommitInput, "userId" | "responsibilityId" | "onLiveView" | "workerRunId">): BrowserCommitArgs {
   const textFacts: Record<string, string> = {};
   for (const [k, v] of Object.entries(input.expectedFacts ?? {})) {
     if (v === null || v === undefined) continue;
@@ -352,8 +360,8 @@ export async function browserPrepareCommit(args: PrepareCommitInput): Promise<To
   }
 
   try {
-    return await withSession(args.onLiveView, async (session) => {
-      await safeTrace({ userId, responsibilityId, kind: "tool.started", detail: { text: `Opening ${host}`, provider: "kernel", liveViewUrl: session.liveViewUrl } });
+    return await withSession({ userId, responsibilityId, workerRunId: args.workerRunId, onLiveView: args.onLiveView, signedIn: true }, async (session) => {
+      await safeTrace({ userId, responsibilityId, kind: "tool.started", detail: { text: `Opening ${host}`, provider: "kernel", browserSessionId: session.browserSessionId } });
       const obs = await runPlaywright<{ facts: Record<string, string | null>; commitVisible: boolean; title: string }>(
         session.id,
         `${SANDBOX_HELPERS}
@@ -444,10 +452,10 @@ export async function browserCommitAuthorized(
   let sessionCreated = false;
   let sessionId: string | null = null;
   try {
-    return await withSession(opts.onLiveView, async (session) => {
+    return await withSession({ userId, responsibilityId, onLiveView: opts.onLiveView, signedIn: true }, async (session) => {
       sessionCreated = true;
       sessionId = session.id;
-      await safeTrace({ userId, responsibilityId, kind: "effect.dispatched", detail: { text: `Finishing on ${host}`, provider: "kernel", liveViewUrl: session.liveViewUrl } });
+      await safeTrace({ userId, responsibilityId, kind: "effect.dispatched", detail: { text: `Finishing on ${host}`, provider: "kernel", browserSessionId: session.browserSessionId } });
       const r = await runPlaywright<{
         stage: string;
         changed?: string[];

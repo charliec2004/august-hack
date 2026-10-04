@@ -3,6 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import path from "node:path";
 
+import { loadArtifact } from "../artifacts";
 import { query } from "../db/client";
 import { recordEvidence } from "../db/evidence";
 import { trace } from "../db/traces";
@@ -453,6 +454,60 @@ export async function publishArtifact(
     data: { artifactId, storageKey: stored.key, sha256: stored.sha256, byteCount: stored.byteCount, filename },
     evidenceRefs: [ev],
     safeSummary: `Saved ${filename} (${stored.byteCount} bytes)`,
+    retry: "safe",
+  });
+}
+
+/**
+ * Copies a stored artifact (e.g. a browser download) onto the Computer at an
+ * absolute path. Bytes are digest-verified out of object storage first; the
+ * Sprite never holds storage credentials. Recorded like a command.
+ */
+export async function putArtifactOnComputer(
+  args: { lease: ComputerLease; artifactId: string; path: string },
+  deps: { sprites?: SpritesPort | null } = {},
+): Promise<ToolResult<{ path: string; filename: string; sha256: string; byteCount: number }>> {
+  const sprites = deps.sprites === undefined ? getSpritesProvider() : deps.sprites;
+  if (!sprites) return blockedOrFailed("copy the file", NOT_CONFIGURED);
+  if (!path.posix.isAbsolute(args.path) || args.path.includes("\0") || args.path.split("/").includes("..")) {
+    return result({ status: "failed", safeSummary: "Path must be absolute (no ..)", retry: "never" });
+  }
+  const row = await loadOwned(args.lease);
+  if (!row || (row.lifecycle !== "running" && row.lifecycle !== "dormant")) {
+    return result({ status: "failed", safeSummary: "This computer is no longer available", retry: "never" });
+  }
+  let art;
+  try {
+    art = await loadArtifact(args.lease.userId, args.artifactId);
+  } catch (err) {
+    return result({ status: "failed", safeSummary: `Artifact failed verification: ${(err as Error).message.slice(0, 120)}`, retry: "never" });
+  }
+  if (!art) return result({ status: "failed", safeSummary: "Unknown artifact", retry: "never" });
+  const dir = path.posix.dirname(args.path);
+  if (dir !== "/") {
+    const mk = await sprites.exec(row.provider_ref, { command: `mkdir -p ${shellQuote(dir)}`, timeoutMs: 30_000, maxOutputBytes: 4096 });
+    if (!mk.ok) return blockedOrFailed("prepare the folder", mk.error);
+  }
+  const w = await sprites.writeFile(row.provider_ref, args.path, art.bytes, 0o644);
+  if (!w.ok) return blockedOrFailed("copy the file", w.error);
+  const commandId = await recordCommand({
+    computerId: row.id,
+    userId: args.lease.userId,
+    command: `# put artifact ${art.artifactId} -> ${args.path}`,
+    exitCode: 0,
+    stdout: art.sha256,
+    safeOutput: `wrote ${art.byteCount} bytes (sha256 ${art.sha256})`,
+  });
+  await trace({
+    userId: args.lease.userId,
+    responsibilityId: args.lease.responsibilityId,
+    kind: "computer.command",
+    detail: { text: `Copied ${art.filename} onto the computer`, computerId: row.id, commandId },
+  });
+  return result({
+    status: "succeeded",
+    data: { path: args.path, filename: art.filename, sha256: art.sha256, byteCount: art.byteCount },
+    safeSummary: `Copied ${art.filename} (${art.byteCount} bytes) to ${args.path}`,
     retry: "safe",
   });
 }

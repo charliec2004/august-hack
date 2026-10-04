@@ -32,7 +32,11 @@ provider credential stores. Never paste token values here.
 
 ## Kernel
 - status: READY — runtime API key PRESENT, smoke: list browsers HTTP 200
-- managed auth profile: NOT_NEEDED
+- run browser: one live stealth session per worker run (CAPTCHA solver, user profile, vault linked), lifecycle in `browser_sessions`; interactive live view (user can take control)
+- saved logins: Kernel Vaults project vault `august-logins` (items keyed by `vault_items.id`, D3); `/api/vault` GET/POST/DELETE
+- profiles: one per user `august-u-<userId>`, single writer via `browser_profile_leases`
+- verified live 2026-10-04: vault add -> `vault_sign_in` on the-internet.herokuapp.com/login reached "/secure" (no password in tool output/DB); sign-in persisted to a new browser via profile; download of `student.json` (7951 B) stored as a verified artifact; reconcile closed an abandoned run's session (Kernel 404 after)
+- managed auth connections: NOT_USED (see D3)
 
 ## Exa
 - runtime API key: PRESENT

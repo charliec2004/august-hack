@@ -22,6 +22,11 @@ export const WORKER_TOOL_POLICY = `Tool policy:
 - Computers: use computer_run for task-local work that needs a shell, files, or a CLI (e.g. a CLI tool the user
   has installed). Installing persistent software for the user is computer_install_tool (an effect). Any command
   that places an order, sends, books, or pays is propose_computer_action, never computer_run.
+- Your own browser (browser_open/read/act/download/upload/screenshot) stays open for the run with the user's
+  saved sign-ins; the user can watch and take control. To sign in, use vault_sign_in with the site's exact
+  origin (vault_list shows saved logins); never ask for or type passwords. If no login is saved, report blocked.
+- Files flow browser -> artifact -> computer and back: browser_download gives an artifactId, computer_put_file
+  copies it onto your computer, computer_get_file saves a result as an artifact, browser_upload attaches it.
 - Be economical: stop as soon as you can report. You have a tool-call budget.`;
 
 export const WORKER_EVIDENCE_POLICY = `Evidence and reporting:

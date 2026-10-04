@@ -12,6 +12,7 @@ import {
   type WakeRow,
 } from "@/server/db/wakeups";
 import { runInBackground } from "@/server/background";
+import { reconcileBrowserSessions } from "@/server/browser/sessions";
 import { runWorkerForWake } from "./runWorker";
 
 const OWNER = `august-${process.pid}-${randomUUID().slice(0, 8)}`;
@@ -94,6 +95,8 @@ export async function kickResponsibility(input: {
  * re-arm any nonterminal responsibility with no run, no wake, not waiting on the user.
  */
 export async function repairStranded() {
+  // Close browser sessions whose run ended or that Kernel no longer has.
+  await reconcileBrowserSessions().catch(() => {});
   const stranded = await findStranded();
   for (const s of stranded) {
     await scheduleResponsibilityWake({
