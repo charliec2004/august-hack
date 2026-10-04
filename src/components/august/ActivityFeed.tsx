@@ -12,20 +12,9 @@ type Line = Pick<TimelineActivityItem, "id" | "text" | "at" | "responsibilityId"
   responsibilityTitle?: string | null;
 };
 
-/** "Searched the web · Visited a.com, b.com" — one quiet line for a run of steps. */
-function summarize(items: Line[]): string {
-  const sites = items.filter((i) => i.text.startsWith("Visited ")).map((i) => i.text.slice(8));
-  const other = items.filter((i) => !i.text.startsWith("Visited ")).map((i) => i.text);
-  const visited =
-    sites.length === 0
-      ? []
-      : [`Visited ${sites.slice(0, 2).join(", ")}${sites.length > 2 ? ` and ${sites.length - 2} more` : ""}`];
-  return [...other, ...visited].join(" · ");
-}
-
 /**
  * A run of August's steps inline in the conversation, where they happened.
- * One summary line by default; expands to the individual steps.
+ * Just "Worked" by default; expands to the individual steps.
  */
 export function ActivityLines({ items }: { items: TimelineActivityItem[] }) {
   const [expanded, setExpanded] = useState(false);
@@ -43,7 +32,7 @@ export function ActivityLines({ items }: { items: TimelineActivityItem[] }) {
           aria-expanded={expanded}
           className="text-muted-foreground hover:text-foreground inline-flex min-w-0 items-baseline gap-1 text-left transition-colors"
         >
-          <span className="truncate">{summarize(items)}</span>
+          <span>Worked</span>
           <ChevronDownIcon className={cn("size-3.5 shrink-0 translate-y-[2px] transition-transform", expanded && "rotate-180")} />
         </button>
         {live && <WatchButton browser={live} onWatch={watch} />}
