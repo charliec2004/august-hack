@@ -17,7 +17,8 @@ function createPool(): Pool {
   if (!connectionString) {
     throw new Error("DATABASE_URL is not set");
   }
-  const pool = new Pool({ connectionString, max: 10 });
+  // pg treats sslmode=require as verify-full already; say so explicitly to avoid its warning.
+  const pool = new Pool({ connectionString: connectionString.replace("sslmode=require", "sslmode=verify-full"), max: 10 });
   pool.on("error", (err) => {
     // Idle client errors must not crash the process; never log connection details.
     console.error("pg pool error:", err.message);
