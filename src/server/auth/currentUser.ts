@@ -1,5 +1,6 @@
 import "server-only";
 
+import { ensureDemoChannelIdentity } from "@/server/channels/identities";
 import { query } from "@/server/db/client";
 
 export type CurrentUser = { id: string; authSubject: string; timezone: string };
@@ -12,7 +13,9 @@ export type CurrentUser = { id: string; authSubject: string; timezone: string };
  */
 export async function currentUser(): Promise<CurrentUser> {
   const subject = process.env.DEMO_USER_SUBJECT || "demo-user";
-  return ensureUser(subject);
+  const user = await ensureUser(subject);
+  await ensureDemoChannelIdentity(user.id);
+  return user;
 }
 
 export async function ensureUser(subject: string): Promise<CurrentUser> {

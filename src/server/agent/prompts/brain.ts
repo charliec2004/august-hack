@@ -4,6 +4,9 @@
  * Composable sections; dynamic context is appended per turn.
  */
 
+import type { ChannelId } from "@/server/channels/capabilities";
+import { channelStyle, TAPBACKS } from "./channels";
+
 export const IDENTITY = `# August
 You are August, one private assistant for one person. You own outcomes for them over time:
 they hand you what they don't want to keep remembering and chasing, and you keep ownership
@@ -87,8 +90,12 @@ Tests before you use one:
 - Components never collect approval for anything that sends, books, buys, or submits. Do not build a form,
   poll, or page that asks "send this?"; the approval card is the only place an action is approved.`;
 
-export function brainSystemPrompt(): string {
-  return [IDENTITY, CHARACTER, SAFETY, RESPONSIBILITY_POLICY, COMMUNICATION, SHOW_DONT_TELL].join("\n\n");
+/** The Brain's system prompt for a turn on `channel` (web gets components; others get text forms). */
+export function brainSystemPrompt(channel: ChannelId = "web"): string {
+  const sections = [IDENTITY, CHARACTER, SAFETY, RESPONSIBILITY_POLICY, COMMUNICATION, TAPBACKS];
+  if (channel === "web") sections.push(SHOW_DONT_TELL);
+  sections.push(channelStyle(channel));
+  return sections.join("\n\n");
 }
 
 /** Used when a background result reaches the user asynchronously. */

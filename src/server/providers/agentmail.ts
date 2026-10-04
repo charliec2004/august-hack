@@ -293,6 +293,39 @@ export async function mailSendAuthorized(effect: AuthorizedEffect): Promise<Disp
   };
 }
 
+/**
+ * Conversational email to the user's own verified address (the email channel).
+ * This is August replying to its principal, like a chat message, not an
+ * external effect: callers must only pass an address from a verified
+ * channel identity. Replies in `replyToMessageId`'s thread when given.
+ */
+export async function mailSendToUser(input: {
+  to: string;
+  subject: string;
+  text: string;
+  replyToMessageId?: string | null;
+  idempotencyKey: string;
+}): Promise<{ messageId: string; threadId: string }> {
+  const inbox = agentMailInboxId();
+  const reqOpts = { idempotencyKey: input.idempotencyKey, timeoutInSeconds: 30 };
+  const to = [normalizeAddress(input.to)];
+  const fresh = () =>
+    am().inboxes.messages.send(
+      inbox,
+      { to, subject: input.subject, text: input.text },
+      { ...reqOpts, idempotencyKey: `${input.idempotencyKey}-new` },
+    );
+  if (!input.replyToMessageId) return fresh();
+  try {
+    return await am().inboxes.messages.reply(inbox, input.replyToMessageId, { to, text: input.text }, reqOpts);
+  } catch (err) {
+    // The original is gone (or never reached this inbox): start a new thread instead.
+    const status = statusOf(err);
+    if (status === 404 || status === 400) return fresh();
+    throw err;
+  }
+}
+
 export type MailMessageSummary = {
   messageId: string;
   threadId: string;

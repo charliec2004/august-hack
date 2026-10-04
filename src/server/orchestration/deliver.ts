@@ -13,6 +13,7 @@ import { BRAIN_DELIVERY_PROMPT } from "@/server/agent/prompts/brain";
 import type { WorkerReport } from "@/server/types/domain";
 import { describeUi, MINI_APP_MAX_HTML, type AskUser, type ShowChart } from "@/lib/genui";
 import { vetGeneratedHtml } from "@/server/genui/vetHtml";
+import { deliveryTarget, sendDeliveryEmail } from "@/server/channels/delivery";
 
 export type DeliveryKind = "completed" | "needs_approval" | "needs_input" | "failed" | "waiting";
 
@@ -41,6 +42,9 @@ export async function deliverUpdate(input: {
 
   const resp = await getResponsibility(userId, responsibilityId);
   if (!resp) return;
+  // Updates go back to the channel the request came in on.
+  const target = await deliveryTarget(userId, resp.source_message_id);
+  const system = target.channel === "email" ? `${BRAIN_DELIVERY_PROMPT}\n\n${EMAIL_DELIVERY_NOTE}` : BRAIN_DELIVERY_PROMPT;
   const { rows: u } = await query<{ timezone: string }>(`select timezone from app_users where id = $1`, [userId]);
   const tz = u[0]?.timezone ?? "UTC";
   const nextCheck = resp.next_wake_at
@@ -66,7 +70,7 @@ export async function deliverUpdate(input: {
   try {
     const out = await generateText({
       model: modelFor("brain"),
-      system: BRAIN_DELIVERY_PROMPT,
+      system,
       prompt,
       output: Output.object({ schema: deliverySchema }),
       abortSignal: AbortSignal.timeout(45_000),
@@ -78,7 +82,7 @@ export async function deliverUpdate(input: {
     try {
       const out = await generateText({
         model: modelFor("brain"),
-        system: `${BRAIN_DELIVERY_PROMPT}\n\nOutput only the message text, with no ui.`,
+        system: `${system}\n\nOutput only the message text, with no ui.`,
         prompt,
         abortSignal: AbortSignal.timeout(30_000),
         providerOptions: gatewayProviderOptions,
@@ -100,7 +104,19 @@ export async function deliverUpdate(input: {
     // Interactive cards get a stable id so only a submission of this card resolves it.
     parts: [{ type: "text", text }, ...(ui ? [{ type: `data-${ui.kind}`, data: { id: `card_${nanoid(12)}`, ...ui.data } }] : [])],
     responsibilityId,
+    channel: target.channel,
   });
+  if (target.channel === "email") {
+    await sendDeliveryEmail({
+      userId,
+      target,
+      messageId: msg.id,
+      title: resp.title,
+      text,
+      ui: ui ? { kind: ui.kind, data: ui.kind === "html" ? { ...ui.data, height: null } : ui.data } : null,
+      approvalResponsibilityId: kind === "needs_approval" ? responsibilityId : null,
+    });
+  }
   await trace({
     userId,
     responsibilityId,
@@ -108,6 +124,12 @@ export async function deliverUpdate(input: {
     detail: { deliveryKind: kind, messageId: msg.id, summary: report.summary.slice(0, 200) },
   });
 }
+
+/** Added to the delivery prompt when the update goes out by email. */
+const EMAIL_DELIVERY_NOTE = `# This update goes out by email
+They asked for this by email, so this message is emailed to them (and also kept in the app). Plain text: no
+markdown. Any ui you return is turned into text for the email. If it needs their OK, say it's drafted and ready
+to review in the app; the link is added for you, so never write one.`;
 
 function fallbackText(kind: DeliveryKind, title: string, report: WorkerReport, nextCheck: string | null) {
   switch (kind) {

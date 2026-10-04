@@ -2,14 +2,14 @@ import { toAISdkStream } from "@mastra/ai-sdk";
 import {
   createUIMessageStream,
   createUIMessageStreamResponse,
-  type ModelMessage,
   type UIMessage,
 } from "ai";
 import { after } from "next/server";
 import { brainAgent } from "@/server/agent/brain";
+import { brainHistory } from "@/server/agent/history";
 import { gatewayProviderOptions, modelConfigured } from "@/server/agent/model";
 import { currentUser } from "@/server/auth/currentUser";
-import { ensurePrimaryThread, insertMessage, recentMessages } from "@/server/db/messages";
+import { ensurePrimaryThread, insertMessage } from "@/server/db/messages";
 import { captureMemories } from "@/server/memory/memories";
 import { updateThreadSummary, VERBATIM_TAIL } from "@/server/memory/summary";
 import { trace } from "@/server/db/traces";
@@ -107,16 +107,9 @@ export async function POST(req: Request) {
 
   const agent = await brainAgent({ userId: user.id, threadId, sourceMessageId: msg.id }, text);
   // Postgres is the conversation of record (includes updates August delivered
-  // asynchronously); only the recent tail goes to the model (spec 15).
-  const history = await recentMessages(user.id, threadId, VERBATIM_TAIL);
-  const stream = await agent.stream(
-    history
-      .filter((m) => m.role !== "system")
-      .map((m): ModelMessage =>
-        m.role === "user" ? { role: "user", content: m.content } : { role: "assistant", content: m.content },
-      ),
-    { maxSteps: 6, providerOptions: gatewayProviderOptions },
-  );
+  // asynchronously, and tapbacks); only the recent tail goes to the model (spec 15).
+  const history = await brainHistory(user.id, threadId, VERBATIM_TAIL);
+  const stream = await agent.stream(history, { maxSteps: 6, providerOptions: gatewayProviderOptions });
 
   after(async () => {
     try {

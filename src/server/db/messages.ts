@@ -1,6 +1,16 @@
 import "server-only";
 
+import type { ChannelId } from "@/server/channels/capabilities";
 import { query } from "./client";
+
+/**
+ * Who a message speaks for:
+ *  - 'user_instruction': authenticated user text (the only kind that may authorize effects)
+ *  - 'unverified_channel': user text from a channel whose sender authentication
+ *    could not be confirmed (answered, never authorizing)
+ *  - 'none': assistant output and system notes
+ */
+export type AuthorityKind = "user_instruction" | "unverified_channel" | "none";
 
 export type MessageRow = {
   id: string;
@@ -8,8 +18,10 @@ export type MessageRow = {
   user_id: string;
   role: "user" | "assistant" | "system";
   content: string;
-  authority_kind: string;
+  authority_kind: AuthorityKind;
   parts: unknown[] | null;
+  channel: ChannelId;
+  channel_ref: Record<string, unknown> | null;
   responsibility_id: string | null;
   created_at: Date;
 };
@@ -29,9 +41,9 @@ export async function ensurePrimaryThread(userId: string): Promise<string> {
 }
 
 /**
- * Persist a message. `authority_kind`:
- *  - 'user_instruction' for authenticated user text (the only kind that may authorize effects)
- *  - 'none' for assistant output and system notes
+ * Persist a message. User text defaults to 'user_instruction' (web chat is
+ * authenticated); a channel that could not authenticate its sender passes
+ * 'unverified_channel'. Non-user messages are always 'none'.
  */
 export async function insertMessage(m: {
   threadId: string;
@@ -40,11 +52,14 @@ export async function insertMessage(m: {
   content: string;
   parts?: unknown[] | null;
   responsibilityId?: string | null;
+  channel?: ChannelId;
+  channelRef?: Record<string, unknown> | null;
+  authorityKind?: Exclude<AuthorityKind, "none">;
 }): Promise<MessageRow> {
-  const authority = m.role === "user" ? "user_instruction" : "none";
+  const authority: AuthorityKind = m.role === "user" ? (m.authorityKind ?? "user_instruction") : "none";
   const { rows } = await query<MessageRow>(
-    `insert into messages (thread_id, user_id, role, content, authority_kind, parts, responsibility_id)
-     values ($1, $2, $3, $4, $5, $6, $7)
+    `insert into messages (thread_id, user_id, role, content, authority_kind, parts, responsibility_id, channel, channel_ref)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      returning *`,
     [
       m.threadId,
@@ -54,6 +69,8 @@ export async function insertMessage(m: {
       authority,
       m.parts ? JSON.stringify(m.parts) : null,
       m.responsibilityId ?? null,
+      m.channel ?? "web",
+      m.channelRef ? JSON.stringify(m.channelRef) : null,
     ],
   );
   return rows[0];
@@ -81,4 +98,16 @@ export async function recentUserInstructions(userId: string, threadId: string, l
     [userId, threadId, limit],
   );
   return rows;
+}
+
+/** The channel a message arrived on, and its provider reference (user-scoped). */
+export async function messageChannel(
+  userId: string,
+  messageId: string,
+): Promise<{ channel: ChannelId; channel_ref: Record<string, unknown> | null } | null> {
+  const { rows } = await query<{ channel: ChannelId; channel_ref: Record<string, unknown> | null }>(
+    `select channel, channel_ref from messages where user_id = $1 and id = $2`,
+    [userId, messageId],
+  );
+  return rows[0] ?? null;
 }

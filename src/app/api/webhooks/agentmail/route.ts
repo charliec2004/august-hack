@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { decideInboundEmail, parseInboundEmail, type InboundDecision } from "@/server/channels/emailInbound";
+import { receiveEmailMessage } from "@/server/channels/emailTurn";
+import { findVerifiedIdentity } from "@/server/channels/identities";
 import { query } from "@/server/db/client";
 import { recordEvidence } from "@/server/db/evidence";
 import { trace } from "@/server/db/traces";
@@ -11,6 +14,10 @@ export const maxDuration = 300;
  * AgentMail inbound webhook (spec 21, 41.4): verify -> dedupe by event id ->
  * persist a safe provider event -> map thread to responsibility -> wake.
  * Returns 200 promptly; the Worker resumes in the background.
+ *
+ * Mail that is not on a responsibility's thread may be the user talking to
+ * August on the email channel: only from a verified channel identity, never
+ * from our own inbox or an auto-responder (see channels/emailInbound.ts).
  */
 export async function POST(req: Request) {
   const raw = await req.text();
@@ -40,6 +47,14 @@ export async function POST(req: Request) {
     : { rows: [] as { user_id: string; responsibility_id: string }[] };
   const owner = link.rows[0] ?? null;
 
+  // Not a responsibility thread: is it the user writing to August?
+  const mail = owner ? null : parseInboundEmail(payload);
+  const sender = mail?.from ? await findVerifiedIdentity("email", mail.from) : null;
+  const decision: InboundDecision | null = mail
+    ? decideInboundEmail({ mail, ownInbox: process.env.AGENTMAIL_INBOX_ID ?? "", senderVerified: !!sender })
+    : null;
+  const eventUserId = owner?.user_id ?? (decision?.action === "conversation" ? sender?.user_id : null) ?? null;
+
   const inserted = await query<{ id: string }>(
     `insert into provider_events
        (user_id, responsibility_id, provider, external_event_id, event_kind, payload_digest, safe_payload)
@@ -47,7 +62,7 @@ export async function POST(req: Request) {
      on conflict (provider, external_event_id) do nothing
      returning id`,
     [
-      owner?.user_id ?? null,
+      eventUserId,
       owner?.responsibility_id ?? null,
       eventId,
       ev.eventType,
@@ -58,8 +73,16 @@ export async function POST(req: Request) {
   // Replay of an already-seen event: acknowledge, never wake twice.
   if (!inserted.rows[0]) return Response.json({ ok: true, duplicate: true });
 
+  if (!owner && mail && sender && decision?.action === "conversation") {
+    await receiveEmailMessage({ userId: sender.user_id, replyTo: sender.address, mail, authority: decision.authority });
+    await query(`update provider_events set consumed_at = now() where id = $1`, [inserted.rows[0].id]);
+    return Response.json({ ok: true, channel: "email", authority: decision.authority });
+  }
+
   // Loop prevention: only genuine inbound mail on a linked thread wakes work.
-  if (!ev.isInboundMessage || !owner) return Response.json({ ok: true, ignored: true });
+  if (!ev.isInboundMessage || !owner) {
+    return Response.json({ ok: true, ignored: true, reason: decision?.action === "ignore" ? decision.reason : undefined });
+  }
 
   await recordEvidence({
     userId: owner.user_id,

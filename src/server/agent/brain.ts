@@ -1,6 +1,8 @@
 import "server-only";
 
 import { Agent } from "@mastra/core/agent";
+import { isGenUiTool } from "@/lib/genui";
+import { capabilitiesOf, type ChannelId } from "@/server/channels/capabilities";
 import { query } from "@/server/db/client";
 import { pendingApprovals } from "@/server/db/effects";
 import { listResponsibilities } from "@/server/db/responsibilities";
@@ -13,8 +15,9 @@ import { modelFor } from "./model";
 /** Bounded per-turn context packet (spec 15). Never dumps the database. */
 export async function brainContextPacket(
   userId: string,
-  opts: { threadId?: string; latestUserText?: string } = {},
+  opts: { threadId?: string; latestUserText?: string; channel?: ChannelId } = {},
 ): Promise<string> {
+  const channel = opts.channel ?? "web";
   const [{ rows: u }, resps, approvals, summary, memories] = await Promise.all([
     query<{ timezone: string }>(`select timezone from app_users where id = $1`, [userId]),
     listResponsibilities(userId),
@@ -45,7 +48,10 @@ export async function brainContextPacket(
 
   const name = process.env.DEMO_USER_NAME;
   return `# Now
-${local} (${tz}).${name ? `
+${local} (${tz}).
+
+# Channel
+You are talking on: ${channel}. ${describeCapabilities(channel)}${name ? `
 
 # The user
 Name: ${name}` : ""}
@@ -63,13 +69,33 @@ ${owned}
 ${pending}`;
 }
 
-export async function brainAgent(ctx: BrainContext, latestUserText?: string) {
-  const packet = await brainContextPacket(ctx.userId, { threadId: ctx.threadId, latestUserText });
+function describeCapabilities(channel: ChannelId): string {
+  const c = capabilitiesOf(channel);
+  return [
+    c.richUi ? "Interface components render." : "Text only: no interface components.",
+    c.forms === "native" ? "Questions go in a form." : "Questions go as a numbered list to reply to.",
+    c.approvals === "inline_card" ? "Approvals show as cards." : "Approvals happen in the app, by link.",
+    `Formatting: ${c.formatting.replace("_", " ")}.`,
+    c.maxLength ? `Keep a message under ${c.maxLength} characters.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** Brain tools for a channel: generative UI tools only where components render. */
+function toolsFor(ctx: BrainContext, channel: ChannelId) {
+  const all = brainTools(ctx);
+  if (capabilitiesOf(channel).richUi) return all;
+  return Object.fromEntries(Object.entries(all).filter(([name]) => !isGenUiTool(name))) as Partial<typeof all>;
+}
+
+export async function brainAgent(ctx: BrainContext, latestUserText?: string, channel: ChannelId = "web") {
+  const packet = await brainContextPacket(ctx.userId, { threadId: ctx.threadId, latestUserText, channel });
   return new Agent({
     id: "august-brain",
     name: "August",
-    instructions: `${brainSystemPrompt()}\n\n${packet}`,
+    instructions: `${brainSystemPrompt(channel)}\n\n${packet}`,
     model: modelFor("brain"),
-    tools: brainTools(ctx),
+    tools: toolsFor(ctx, channel),
   });
 }

@@ -5,6 +5,7 @@ import { stripHistoryLines } from "@/lib/genui";
 import { listActivity } from "@/server/activity";
 import { recentUserFacingEffects } from "@/server/db/effects";
 import { ensurePrimaryThread, recentMessages, type MessageRow } from "@/server/db/messages";
+import { reactionsFor } from "@/server/db/reactions";
 import { listResponsibilities } from "@/server/db/responsibilities";
 import type {
   ActivityItem,
@@ -102,10 +103,14 @@ export async function buildTimeline(
   const messages = (await recentMessages(userId, threadId, MESSAGE_LIMIT)).filter((m) => m.role !== "system");
   // A full page of messages bounds the window; otherwise show everything recent.
   const since = messages.length >= MESSAGE_LIMIT ? messages[0].created_at : null;
-  const [activity, effects, responsibilities] = await Promise.all([
+  const [activity, effects, responsibilities, reactions] = await Promise.all([
     listActivity(userId, { since, limit: ACTIVITY_LIMIT }),
     recentUserFacingEffects(userId),
     listResponsibilities(userId),
+    reactionsFor(
+      userId,
+      messages.map((m) => m.id),
+    ),
   ]);
   const titles = new Map(responsibilities.map((r) => [r.id, r.title]));
 
@@ -174,7 +179,16 @@ export async function buildTimeline(
       id: m.id,
       role: m.role as "user" | "assistant",
       parts,
-      metadata: { createdAt: m.created_at.toISOString(), responsibilityId: m.responsibility_id },
+      // `messageId` and `reaction` are always set on stored messages: consecutive
+      // assistant messages render merged, and the last one's values win, so a
+      // tapback on the merged bubble targets (and shows) its latest message.
+      metadata: {
+        createdAt: m.created_at.toISOString(),
+        responsibilityId: m.responsibility_id,
+        messageId: m.id,
+        reaction: reactions.get(m.id)?.emoji ?? null,
+        channel: m.channel,
+      },
     });
   }
   flush();

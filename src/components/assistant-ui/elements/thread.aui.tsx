@@ -61,6 +61,7 @@ import {
   type PropsWithChildren,
 } from "react";
 import { WorkingIndicator } from "@/components/august/genui/WorkingIndicator";
+import { ChannelMarker, TAPBACK_HOST_CLASS, Tapbackable } from "@/components/august/Tapback";
 
 export type ThreadGroupPart = MessagePrimitive.GroupedParts.GroupPart;
 
@@ -497,94 +498,101 @@ const AssistantMessage: FC = () => {
       data-slot="aui_assistant-message-root"
       data-role="assistant"
       data-responsibility-id={responsibilityId}
-      className="fade-in slide-in-from-bottom-1 animate-in relative duration-150 [contain-intrinsic-size:auto_200px] [content-visibility:auto]"
+      className={cn(
+        "fade-in slide-in-from-bottom-1 animate-in relative duration-150 [contain-intrinsic-size:auto_200px] [content-visibility:auto]",
+        TAPBACK_HOST_CLASS,
+      )}
     >
-      <div
-        data-slot="aui_assistant-message-content"
-        className="text-foreground px-2 leading-relaxed wrap-break-word"
-      >
-        <MessagePrimitive.GroupedParts groupBy={groupBy}>
-          {({ part, children }) => {
-            switch (part.type) {
-              case "group-chainOfThought":
-                return <div data-slot="aui_chain-of-thought">{children}</div>;
-              case "group-task":
-                return TaskGroupComponent ? (
-                  <TaskGroupComponent group={part} />
-                ) : null;
-              case "group-tool":
-                if (ToolGroup) {
-                  return <ToolGroup group={part}>{children}</ToolGroup>;
-                }
-                return (
-                  <ToolGroupRoot variant="ghost">
-                    <ToolGroupTrigger
-                      count={part.indices.length}
-                      active={part.status.type === "running"}
-                    />
-                    <ToolGroupContent>{children}</ToolGroupContent>
-                  </ToolGroupRoot>
-                );
-              case "group-reasoning": {
-                if (ReasoningGroup) {
+      <Tapbackable align="start">
+        <div
+          data-slot="aui_assistant-message-content"
+          className="text-foreground px-2 leading-relaxed wrap-break-word"
+        >
+          <MessagePrimitive.GroupedParts groupBy={groupBy}>
+            {({ part, children }) => {
+              switch (part.type) {
+                case "group-chainOfThought":
+                  return <div data-slot="aui_chain-of-thought">{children}</div>;
+                case "group-task":
+                  return TaskGroupComponent ? (
+                    <TaskGroupComponent group={part} />
+                  ) : null;
+                case "group-tool":
+                  if (ToolGroup) {
+                    return <ToolGroup group={part}>{children}</ToolGroup>;
+                  }
                   return (
-                    <ReasoningGroup group={part}>{children}</ReasoningGroup>
+                    <ToolGroupRoot variant="ghost">
+                      <ToolGroupTrigger
+                        count={part.indices.length}
+                        active={part.status.type === "running"}
+                      />
+                      <ToolGroupContent>{children}</ToolGroupContent>
+                    </ToolGroupRoot>
+                  );
+                case "group-reasoning": {
+                  if (ReasoningGroup) {
+                    return (
+                      <ReasoningGroup group={part}>{children}</ReasoningGroup>
+                    );
+                  }
+                  const running = part.status.type === "running";
+                  return (
+                    <ReasoningRoot streaming={running}>
+                      <ReasoningTrigger active={running} />
+                      <ReasoningContent aria-busy={running}>
+                        <ReasoningText>{children}</ReasoningText>
+                      </ReasoningContent>
+                    </ReasoningRoot>
                   );
                 }
-                const running = part.status.type === "running";
-                return (
-                  <ReasoningRoot streaming={running}>
-                    <ReasoningTrigger active={running} />
-                    <ReasoningContent aria-busy={running}>
-                      <ReasoningText>{children}</ReasoningText>
-                    </ReasoningContent>
-                  </ReasoningRoot>
-                );
+                case "text":
+                  // Consecutive assistant messages arrive merged into one; each update is its own text part.
+                  return (
+                    <div className="aui-text-part">
+                      <MarkdownText />
+                    </div>
+                  );
+                case "reasoning":
+                  return <Reasoning {...part} />;
+                case "tool-call":
+                  return part.toolUI ?? <ToolFallbackComponent {...part} />;
+                case "data":
+                  return part.dataRendererUI;
+                case "file":
+                  return (
+                    <div data-slot="aui_assistant-message-file" className="py-1">
+                      <File {...part} />
+                    </div>
+                  );
+                case "image":
+                  return (
+                    <div data-slot="aui_assistant-message-image" className="py-1">
+                      <Image {...part} />
+                    </div>
+                  );
+                case "indicator":
+                  return (
+                    <span
+                      data-slot="aui_assistant-message-indicator"
+                      className="animate-pulse font-sans"
+                      aria-label="Assistant is working"
+                    >
+                      {"●"}
+                    </span>
+                  );
+                default:
+                  return null;
               }
-              case "text":
-                // Consecutive assistant messages arrive merged into one; each update is its own text part.
-                return (
-                  <div className="aui-text-part">
-                    <MarkdownText />
-                  </div>
-                );
-              case "reasoning":
-                return <Reasoning {...part} />;
-              case "tool-call":
-                return part.toolUI ?? <ToolFallbackComponent {...part} />;
-              case "data":
-                return part.dataRendererUI;
-              case "file":
-                return (
-                  <div data-slot="aui_assistant-message-file" className="py-1">
-                    <File {...part} />
-                  </div>
-                );
-              case "image":
-                return (
-                  <div data-slot="aui_assistant-message-image" className="py-1">
-                    <Image {...part} />
-                  </div>
-                );
-              case "indicator":
-                return (
-                  <span
-                    data-slot="aui_assistant-message-indicator"
-                    className="animate-pulse font-sans"
-                    aria-label="Assistant is working"
-                  >
-                    {"●"}
-                  </span>
-                );
-              default:
-                return null;
-            }
-          }}
-        </MessagePrimitive.GroupedParts>
-        <WorkingIndicator />
-        <MessageError />
+            }}
+          </MessagePrimitive.GroupedParts>
+          <WorkingIndicator />
+          <MessageError />
+        </div>
+      </Tapbackable>
+      <div className="px-2">
+        <ChannelMarker align="start" />
       </div>
-
     </MessagePrimitive.Root>
   );
 };
@@ -608,22 +616,27 @@ const UserMessage: FC = () => {
     <MessagePrimitive.Root
       data-slot="aui_user-message-root"
       data-responsibility-id={responsibilityId}
-      className="fade-in slide-in-from-bottom-1 animate-in grid auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 duration-150 [contain-intrinsic-size:auto_200px] [content-visibility:auto] [&:where(>*)]:col-start-2"
+      className={cn(
+        "fade-in slide-in-from-bottom-1 animate-in grid auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 duration-150 [contain-intrinsic-size:auto_200px] [content-visibility:auto] [&:where(>*)]:col-start-2",
+        TAPBACK_HOST_CLASS,
+      )}
       data-role="user"
     >
       <UserMessageAttachments />
 
       <div className="aui-user-message-content-wrapper relative col-start-2 min-w-0">
-        <div className="aui-user-message-content peer bg-muted text-foreground rounded-(--composer-radius) px-4 py-2 wrap-break-word empty:hidden">
-          <MessagePrimitive.Parts
-            components={{ File: UserFilePart, Image: UserImagePart }}
-          />
-        </div>
-        <div className="aui-user-action-bar-wrapper absolute start-0 top-1/2 -translate-x-full -translate-y-1/2 pe-2 peer-empty:hidden rtl:translate-x-full">
-          <UserActionBar />
-        </div>
+        <Tapbackable align="end">
+          <div className="aui-user-message-content peer bg-muted text-foreground rounded-(--composer-radius) px-4 py-2 wrap-break-word empty:hidden">
+            <MessagePrimitive.Parts
+              components={{ File: UserFilePart, Image: UserImagePart }}
+            />
+          </div>
+          <div className="aui-user-action-bar-wrapper absolute start-0 top-1/2 -translate-x-full -translate-y-1/2 pe-2 peer-empty:hidden rtl:translate-x-full">
+            <UserActionBar />
+          </div>
+        </Tapbackable>
+        <ChannelMarker align="end" />
       </div>
-
     </MessagePrimitive.Root>
   );
 };

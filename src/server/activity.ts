@@ -41,13 +41,14 @@ export async function listActivity(
     }));
 }
 
-/** Changes whenever a message, an activity line, or an effect's state changes. */
+/** Changes whenever a message, an activity line, an effect's state, or a reaction changes. */
 export async function timelineVersion(userId: string): Promise<string> {
   const { rows } = await query<{ v: string }>(
     `select concat_ws('|',
         (select max(created_at)::text from messages where user_id = $1),
         (select max(id)::text from trace_events where user_id = $1 and safe_detail ? 'text'),
-        (select max(updated_at)::text from effect_proposals where user_id = $1)) as v`,
+        (select max(updated_at)::text from effect_proposals where user_id = $1),
+        (select count(*)::text || ':' || coalesce(max(created_at)::text, '') from message_reactions where user_id = $1)) as v`,
     [userId],
   );
   return rows[0]?.v ?? "";
