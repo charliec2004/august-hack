@@ -162,3 +162,9 @@
 @custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
 
 @custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));
+/* Separate August's consecutive updates (merged into one message by the runtime). */
+.aui-text-part + .aui-text-part {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid color-mix(in oklab, currentColor 8%, transparent);
+}

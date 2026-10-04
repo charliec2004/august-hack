@@ -539,7 +539,12 @@ const AssistantMessage: FC = () => {
                 );
               }
               case "text":
-                return <MarkdownText />;
+                // Consecutive assistant messages arrive merged into one; each update is its own text part.
+                return (
+                  <div className="aui-text-part">
+                    <MarkdownText />
+                  </div>
+                );
               case "reasoning":
                 return <Reasoning {...part} />;
               case "tool-call":
