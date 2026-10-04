@@ -4,7 +4,7 @@ import { Agent } from "@mastra/core/agent";
 import type { ResponsibilityRow } from "@/server/db/responsibilities";
 import type { WorkerSessionRow } from "@/server/db/workers";
 import type { WorkerReport } from "@/server/types/domain";
-import { modelFor } from "./model";
+import { gatewayProviderOptions, modelFor } from "./model";
 import { workerSystemPrompt } from "./prompts/worker";
 import { workerTools, type WorkerToolContext } from "./workerTools";
 
@@ -89,6 +89,7 @@ export async function runWorkerAgent(input: WorkerRunInput): Promise<WorkerRepor
   });
   const out = await agent.generate(workerPrompt(input, tz), {
     maxSteps: MAX_STEPS,
+    providerOptions: gatewayProviderOptions,
     abortSignal: AbortSignal.timeout(3 * 60_000),
   });
   if (report) return report;

@@ -3,7 +3,7 @@ import "server-only";
 import { generateObject } from "ai";
 import { z } from "zod";
 import type { ReviewDecision } from "@/server/types/domain";
-import { modelFor } from "@/server/agent/model";
+import { gatewayProviderOptions, modelFor } from "@/server/agent/model";
 import { REVIEWER_PROMPT } from "@/server/agent/prompts/reviewer";
 
 /**
@@ -59,6 +59,7 @@ export async function reviewEffect(
         1,
       ),
       abortSignal: AbortSignal.timeout(opts.timeoutMs ?? 20_000),
+      providerOptions: gatewayProviderOptions,
     });
     if (object.decision === "needs_confirmation" && !object.userFacingQuestion) {
       return { ...object, userFacingQuestion: undefined };

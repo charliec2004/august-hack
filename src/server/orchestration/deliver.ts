@@ -5,7 +5,7 @@ import { query } from "@/server/db/client";
 import { ensurePrimaryThread, insertMessage } from "@/server/db/messages";
 import { getResponsibility } from "@/server/db/responsibilities";
 import { trace } from "@/server/db/traces";
-import { modelFor } from "@/server/agent/model";
+import { gatewayProviderOptions, modelFor } from "@/server/agent/model";
 import { BRAIN_DELIVERY_PROMPT } from "@/server/agent/prompts/brain";
 import type { WorkerReport } from "@/server/types/domain";
 
@@ -54,6 +54,7 @@ export async function deliverUpdate(input: {
         nextCheckLocalTime: nextCheck,
       }),
       abortSignal: AbortSignal.timeout(30_000),
+      providerOptions: gatewayProviderOptions,
     });
     text = out.text.trim();
   } catch {

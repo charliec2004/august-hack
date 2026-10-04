@@ -7,7 +7,7 @@ import {
 } from "ai";
 import { after } from "next/server";
 import { brainAgent } from "@/server/agent/brain";
-import { modelConfigured } from "@/server/agent/model";
+import { gatewayProviderOptions, modelConfigured } from "@/server/agent/model";
 import { currentUser } from "@/server/auth/currentUser";
 import { ensurePrimaryThread, insertMessage, recentMessages } from "@/server/db/messages";
 import { trace } from "@/server/db/traces";
@@ -69,7 +69,7 @@ export async function POST(req: Request) {
       .map((m): ModelMessage =>
         m.role === "user" ? { role: "user", content: m.content } : { role: "assistant", content: m.content },
       ),
-    { maxSteps: 6 },
+    { maxSteps: 6, providerOptions: gatewayProviderOptions },
   );
 
   after(async () => {

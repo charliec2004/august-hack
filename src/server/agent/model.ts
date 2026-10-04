@@ -29,7 +29,12 @@ export function modelIdFor(purpose: AugustModelPurpose): string {
   return process.env[ENV_KEYS[purpose]] || DEFAULTS[purpose];
 }
 
-function gateway() {
+/**
+ * `dialect` picks the gateway path: "/v1" is the unified chat-completions
+ * endpoint; "/openai/v1" serves the OpenAI Responses API, which GPT-5.x
+ * reasoning models require when tools are present.
+ */
+function gateway(dialect: "/v1" | "/openai/v1" = "/v1") {
   const base = process.env.NEON_AI_GATEWAY_BASE_URL;
   const token = process.env.NEON_AI_GATEWAY_TOKEN;
   if (!base || !token) {
@@ -37,12 +42,12 @@ function gateway() {
       "Neon AI Gateway is not configured (NEON_AI_GATEWAY_BASE_URL / NEON_AI_GATEWAY_TOKEN).",
     );
   }
-  return createOpenAI({ baseURL: `${base.replace(/\/$/, "")}/v1`, apiKey: token });
+  return createOpenAI({ baseURL: `${base.replace(/\/$/, "")}${dialect}`, apiKey: token });
 }
 
 export class ModelUnavailableError extends Error {}
 
-type ChatModel = ReturnType<ReturnType<typeof createOpenAI>["chat"]>;
+type ChatModel = ReturnType<ReturnType<typeof createOpenAI>["chat"]> | ReturnType<ReturnType<typeof createOpenAI>["responses"]>;
 let override: ((purpose: AugustModelPurpose) => ChatModel) | null = null;
 
 /**
@@ -56,8 +61,18 @@ export function setModelOverrideForTesting(fn: ((purpose: AugustModelPurpose) =>
 /** Chat model for a purpose, routed through Neon AI Gateway chat completions. */
 export function modelFor(purpose: Exclude<AugustModelPurpose, "embedding">): ChatModel {
   if (override) return override(purpose);
-  return gateway().chat(modelIdFor(purpose));
+  const id = modelIdFor(purpose);
+  return id.startsWith("gpt-") ? gateway("/openai/v1").responses(id) : gateway().chat(id);
 }
+
+/**
+ * The gateway doesn't persist Responses-API state, so reasoning must travel
+ * inline (encrypted) instead of as references to stored items. Pass this on
+ * every agent/model call.
+ */
+export const gatewayProviderOptions = {
+  openai: { store: false, include: ["reasoning.encrypted_content" as const] },
+};
 
 export function embeddingModel() {
   return gateway().embedding(modelIdFor("embedding"));
