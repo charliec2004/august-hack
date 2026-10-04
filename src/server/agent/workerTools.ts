@@ -3,7 +3,6 @@ import "server-only";
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { query } from "@/server/db/client";
-import { trace } from "@/server/db/traces";
 import { setLiveView } from "@/server/db/workers";
 import { executeEffect } from "@/server/effects/execute";
 import { prepareEffect } from "@/server/effects/prepare";
@@ -226,9 +225,7 @@ export function workerTools(ctx: WorkerToolContext) {
       execute: async (args) => {
         budget();
         const draft = await mailPrepareSend(args);
-        const res = await propose(draft, "email");
-        if (res.state === "succeeded") await linkMailThread(ctx, res.effectId);
-        return res;
+        return propose(draft, "email");
       },
     });
   }
@@ -347,36 +344,4 @@ export function workerTools(ctx: WorkerToolContext) {
   }
 
   return tools;
-}
-
-/** After a successful send, map the provider thread to this responsibility. */
-async function linkMailThread(ctx: WorkerToolContext, effectId: string) {
-  const { rows } = await query<{ canonical_args: { fromInbox?: string }; provider_receipt_ref: string | null; payload: { threadId?: string } | null }>(
-    `select e.canonical_args, r.provider_receipt_ref, ev.payload
-       from effect_proposals e
-       join effect_receipts r on r.effect_proposal_id = e.id
-       left join evidence_records ev on ev.id::text = any(select jsonb_array_elements_text(r.evidence_refs))
-      where e.id = $1 and e.user_id = $2
-      order by r.created_at desc limit 1`,
-    [effectId, ctx.userId],
-  );
-  const row = rows[0];
-  const threadId = row?.payload?.threadId;
-  const inbox = row?.canonical_args?.fromInbox ?? process.env.AGENTMAIL_INBOX_ID;
-  if (!threadId || !inbox) return;
-  await query(
-    `insert into mail_threads (user_id, responsibility_id, inbox_id, provider_thread_id)
-     values ($1, $2, $3, $4) on conflict (inbox_id, provider_thread_id) do nothing`,
-    [ctx.userId, ctx.responsibilityId, inbox, threadId],
-  );
-  await query(
-    `update responsibilities set waiting_on = 'mail:' || $3, updated_at = now() where user_id = $1 and id = $2`,
-    [ctx.userId, ctx.responsibilityId, threadId],
-  );
-  await trace({
-    userId: ctx.userId,
-    responsibilityId: ctx.responsibilityId,
-    kind: "tool.succeeded",
-    detail: { text: "Waiting for a reply" },
-  });
 }
