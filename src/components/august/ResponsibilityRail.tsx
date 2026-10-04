@@ -27,19 +27,12 @@ export function ResponsibilityRail({
 
   return (
     <nav aria-label="What August owns" className="flex min-h-0 flex-1 flex-col">
-      <div className="px-5 pt-5 pb-2">
-        <h2 className="text-muted-foreground text-[11px] font-semibold tracking-[0.12em] uppercase">
-          What August owns
-        </h2>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-4 pb-4">
         {loading ? (
           <RailSkeleton />
         ) : open.length === 0 && done.length === 0 ? (
           <p className="text-muted-foreground px-3 py-2 text-sm leading-relaxed">
-            Nothing yet. Anything you hand August to keep an eye on will show
-            up here.
+            Nothing yet.
           </p>
         ) : (
           <>
@@ -56,10 +49,7 @@ export function ResponsibilityRail({
             </ul>
             {done.length > 0 && (
               <>
-                <h3 className="text-muted-foreground/80 mt-5 mb-1 px-3 text-[11px] font-medium tracking-wide">
-                  Recently finished
-                </h3>
-                <ul className="flex flex-col gap-0.5">
+                <ul className="mt-4 flex flex-col gap-0.5" aria-label="Finished">
                   {done.map((r) => (
                     <ResponsibilityRow
                       key={r.id}

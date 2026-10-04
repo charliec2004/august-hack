@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useAuiState } from "@assistant-ui/react";
 import {
   ChevronRightIcon,
   LoaderCircleIcon,
@@ -13,30 +12,26 @@ import type {
   ResponsibilityDetail,
   ResponsibilityView,
 } from "@/server/types/api";
-import { WakeButton } from "./DemoControls";
 import { MarkdownBlock } from "./MarkdownBlock";
 import { PanelSection, SidePanel, SidePanelHeader } from "./SidePanel";
 import { SourcesSection } from "./SourcesSection";
-import { formatWhen, isFinished } from "./format";
+import { isFinished } from "./format";
 import { useAugust } from "./useAugustState";
 
 const FACT_LIMIT = 5;
 
 /**
  * Inspection surface for one responsibility. Shows only what the conversation
- * doesn't: where it stands in one line, the key facts, what happens next, and
- * the sources August used.
+ * doesn't: where it stands in one line, the key facts, and the sources.
  */
 export function ResponsibilityDrawer({
   responsibilityId,
   onClose,
   onWatch,
-  onShowInConversation,
 }: {
   responsibilityId: string | null;
   onClose: () => void;
   onWatch: (id: string) => void;
-  onShowInConversation: (id: string) => void;
 }) {
   const { state, loadDetail } = useAugust();
   const summary =
@@ -76,10 +71,7 @@ export function ResponsibilityDrawer({
           view={view}
           detail={d}
           loadFailed={loadFailed}
-          demoControls={state?.demoControls ?? false}
           onWatch={() => onWatch(view.id)}
-          onShowInConversation={() => onShowInConversation(view.id)}
-          onClose={onClose}
         />
       ) : (
         <div className="text-muted-foreground flex flex-1 items-center justify-center text-sm">
@@ -94,27 +86,13 @@ function DrawerBody({
   view,
   detail,
   loadFailed,
-  demoControls,
   onWatch,
-  onShowInConversation,
-  onClose,
 }: {
   view: ResponsibilityView;
   detail: ResponsibilityDetail | null;
   loadFailed: boolean;
-  demoControls: boolean;
   onWatch: () => void;
-  onShowInConversation: () => void;
-  onClose: () => void;
 }) {
-  const finished = isFinished(view);
-  const next = finished ? null : nextLine(view);
-  const inConversation = useAuiState((s) =>
-    s.thread.messages.some(
-      (m) => responsibilityOf(m.metadata) === view.id,
-    ),
-  );
-
   return (
     <>
       <SidePanelHeader title={view.title} />
@@ -138,38 +116,12 @@ function DrawerBody({
                 ))}
               </ul>
             )}
-            {next && (
-              <p
-                className={cn(
-                  "text-muted-foreground flex items-center gap-2 text-sm",
-                  next.attention && "text-attention-foreground font-medium",
-                )}
-              >
-                {view.active && (
-                  <span className="bg-live relative flex size-2 rounded-full" aria-hidden>
-                    <span className="bg-live absolute inset-0 animate-ping rounded-full opacity-50 motion-reduce:hidden" />
-                  </span>
-                )}
-                {next.text}
-              </p>
-            )}
-            {(view.liveViewUrl || inConversation) && (
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                {view.liveViewUrl && (
-                  <Button variant="outline" className="rounded-full" onClick={onWatch}>
-                    <MonitorPlayIcon />
-                    Watch browser
-                  </Button>
-                )}
-                {inConversation && (
-                  <button
-                    type="button"
-                    onClick={onShowInConversation}
-                    className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 transition-colors hover:underline"
-                  >
-                    Show in conversation
-                  </button>
-                )}
+            {view.liveViewUrl && (
+              <div>
+                <Button variant="outline" className="rounded-full" onClick={onWatch}>
+                  <MonitorPlayIcon />
+                  Watch browser
+                </Button>
               </div>
             )}
           </div>
@@ -193,34 +145,8 @@ function DrawerBody({
         </div>
       </div>
 
-      {!finished && (
-        <footer className="flex flex-col gap-2 border-t px-6 py-4">
-          {demoControls && <WakeButton responsibilityId={view.id} />}
-          <CancelControl responsibilityId={view.id} onDone={onClose} />
-        </footer>
-      )}
     </>
   );
-}
-
-/** Message metadata from GET /api/messages lands in `custom`. */
-function responsibilityOf(metadata: unknown): string | null {
-  const custom = (metadata as { custom?: { responsibilityId?: unknown } } | null)?.custom;
-  return typeof custom?.responsibilityId === "string" ? custom.responsibilityId : null;
-}
-
-/** What happens next, for responsibilities that are still open. */
-function nextLine(view: ResponsibilityView): { text: string; attention: boolean } | null {
-  if (view.humanStatus === "Needs you") return { text: "Waiting for your OK", attention: true };
-  if (view.active) return { text: "Working on it now", attention: false };
-  const check = view.nextWakeAt ? `Next check ${formatWhen(view.nextWakeAt)}` : null;
-  if (view.status === "waiting_external") {
-    const text = view.nextWakeAt
-      ? `Waiting for a reply · next check ${formatWhen(view.nextWakeAt)}`
-      : "Waiting for a reply";
-    return { text, attention: false };
-  }
-  return check ? { text: check, attention: false } : null;
 }
 
 function standingFallback(view: ResponsibilityView, detail: ResponsibilityDetail): string {
@@ -267,59 +193,6 @@ function Details({ detail }: { detail: ResponsibilityDetail }) {
         </div>
       )}
     </section>
-  );
-}
-
-function CancelControl({
-  responsibilityId,
-  onDone,
-}: {
-  responsibilityId: string;
-  onDone: () => void;
-}) {
-  const { cancel } = useAugust();
-  const [confirming, setConfirming] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function onConfirm() {
-    setBusy(true);
-    setError(null);
-    const result = await cancel(responsibilityId);
-    setBusy(false);
-    if (result.ok) onDone();
-    else setError(result.error);
-  }
-
-  if (!confirming) {
-    return (
-      <Button
-        variant="ghost"
-        className="text-muted-foreground self-start"
-        onClick={() => setConfirming(true)}
-      >
-        Cancel this
-      </Button>
-    );
-  }
-  return (
-    <div className="flex flex-col gap-2">
-      <p className="text-sm">August will stop working on this.</p>
-      <div className="flex gap-2">
-        <Button variant="destructive" disabled={busy} onClick={onConfirm}>
-          {busy && <LoaderCircleIcon className="animate-spin" />}
-          Stop
-        </Button>
-        <Button
-          variant="ghost"
-          disabled={busy}
-          onClick={() => setConfirming(false)}
-        >
-          Keep going
-        </Button>
-      </div>
-      {error && <p className="text-irreversible text-sm">{error}</p>}
-    </div>
   );
 }
 

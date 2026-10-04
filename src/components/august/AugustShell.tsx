@@ -73,15 +73,6 @@ export function AugustShell() {
     setDrawerId(null);
     setPanel(surface);
   }, []);
-  const showInConversation = useCallback((id: string) => {
-    setDrawerId(null);
-    // Let the drawer start closing before scrolling the thread underneath.
-    requestAnimationFrame(() => {
-      document
-        .querySelector(`[data-responsibility-id="${CSS.escape(id)}"]`)
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  }, []);
   // Live views open only for sessions that are live in the latest state.
   const liveBrowsers = useMemo(() => state?.liveBrowsers ?? [], [state]);
   const watch = useCallback(
@@ -127,6 +118,12 @@ export function AugustShell() {
     [],
   );
 
+  // Reset is for rehearsing the demo only; open the app with ?demo to see it.
+  const showReset = useMemo(
+    () => Boolean(state?.demoControls) && typeof window !== "undefined" && new URLSearchParams(window.location.search).has("demo"),
+    [state?.demoControls],
+  );
+
   const rail = (
     <ResponsibilityRail
       responsibilities={responsibilities}
@@ -137,9 +134,7 @@ export function AugustShell() {
       footer={
         <>
           <AppSurfaces active={panel} onOpen={openPanel} />
-          {state?.demoControls ? (
-            <DemoControls responsibilities={responsibilities} />
-          ) : null}
+          {showReset ? <DemoControls /> : null}
         </>
       }
     />
@@ -211,7 +206,6 @@ export function AugustShell() {
           responsibilityId={drawerId}
           onClose={() => setDrawerId(null)}
           onWatch={watchResponsibility}
-          onShowInConversation={showInConversation}
         />
         <LoginsPanel open={panel === "logins"} onClose={() => setPanel(null)} />
         <ConnectionsPanel

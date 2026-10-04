@@ -1,9 +1,11 @@
 "use client";
 
-import { MonitorPlayIcon } from "lucide-react";
+import { useState } from "react";
+import { FastForwardIcon, LoaderCircleIcon, MonitorPlayIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ResponsibilityView } from "@/server/types/api";
-import { formatWhen, isFinished } from "./format";
+import { isFinished } from "./format";
+import { useAugust } from "./useAugustState";
 
 export function ResponsibilityRow({
   responsibility: r,
@@ -18,8 +20,7 @@ export function ResponsibilityRow({
 }) {
   const needsYou = r.humanStatus === "Needs you";
   const finished = isFinished(r);
-  const nextCheck =
-    r.nextWakeAt && !finished && !r.active ? formatWhen(r.nextWakeAt) : null;
+  const canSkip = Boolean(r.nextWakeAt) && !finished && !r.active;
 
   return (
     <li className="group/row relative">
@@ -52,14 +53,10 @@ export function ResponsibilityRow({
             >
               {r.humanStatus}
             </p>
-            {nextCheck && (
-              <p className="text-muted-foreground/80 truncate text-xs leading-5">
-                Next check {nextCheck}
-              </p>
-            )}
           </div>
         </div>
       </button>
+      {canSkip && <SkipWait responsibilityId={r.id} />}
       {r.liveViewUrl && (
         <button
           type="button"
@@ -91,5 +88,28 @@ function StatusDot({ r }: { r: ResponsibilityView }) {
         <span className="bg-muted-foreground/35 size-2 rounded-full" />
       )}
     </span>
+  );
+}
+
+/** Demo: run the scheduled check now instead of waiting (real wake, real resume). */
+function SkipWait({ responsibilityId }: { responsibilityId: string }) {
+  const { state, wake } = useAugust();
+  const [busy, setBusy] = useState(false);
+  if (!state?.demoControls) return null;
+  return (
+    <button
+      type="button"
+      title="Don't wait — check now"
+      aria-label="Don't wait, check now"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        await wake(responsibilityId);
+        setBusy(false);
+      }}
+      className="text-muted-foreground hover:text-foreground hover:bg-background/80 absolute top-2.5 right-2 rounded-md p-1 opacity-0 transition group-hover/row:opacity-100 focus-visible:opacity-100"
+    >
+      {busy ? <LoaderCircleIcon className="size-3.5 animate-spin" /> : <FastForwardIcon className="size-3.5" />}
+    </button>
   );
 }

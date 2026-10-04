@@ -63,7 +63,7 @@ export function PanelSection({
 }) {
   return (
     <section>
-      <h3 className="text-muted-foreground mb-2 text-[11px] font-semibold tracking-[0.12em] uppercase">
+      <h3 className="text-muted-foreground mb-2 text-sm">
         {title}
       </h3>
       {children}
