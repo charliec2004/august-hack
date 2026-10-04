@@ -143,6 +143,26 @@ export type ShowComparison = z.infer<typeof showComparisonSchema>;
 export type ShowChart = z.infer<typeof chartSchema>;
 export type ShowApp = z.infer<typeof showAppSchema>;
 
+/**
+ * A card submission, sent as a `data-answer` part on the user's message next to
+ * the readable text. A card resolves only from an answer carrying its id (the
+ * tool call id, or the delivery part's id).
+ */
+export const ANSWER_PART = "answer";
+export type CardAnswer = { cardId: string; answers: Record<string, string | string[]> };
+
+export function readAnswer(data: unknown): CardAnswer | null {
+  if (!data || typeof data !== "object") return null;
+  const d = data as Record<string, unknown>;
+  if (typeof d.cardId !== "string" || !d.cardId || !d.answers || typeof d.answers !== "object") return null;
+  const answers: CardAnswer["answers"] = {};
+  for (const [k, v] of Object.entries(d.answers as Record<string, unknown>)) {
+    if (typeof v === "string") answers[k] = v;
+    else if (Array.isArray(v)) answers[k] = v.filter((x): x is string => typeof x === "string");
+  }
+  return { cardId: d.cardId, answers };
+}
+
 /** Brain tool names whose calls render as components. */
 export const GENUI_TOOLS = [
   "show_options",
@@ -180,15 +200,18 @@ export function normalizeForm(data: Partial<AskUser> & LegacyAskUser): {
   submitLabel: string | null;
 } {
   if (Array.isArray(data.questions)) {
-    const questions = data.questions
-      .filter((q): q is FormQuestion => Boolean(q?.id && q?.prompt && q?.kind))
-      .map((q) => ({
-        ...q,
-        choices: (q.choices ?? []).filter((c) => Boolean(c?.id && c?.label)),
-        allowOther: Boolean(q.allowOther),
-        placeholder: q.placeholder ?? null,
-        scale: q.scale ?? null,
-      }));
+    // Answer state is keyed by id, so ids must be unique: a missing or repeated
+    // id becomes its position ("q3"), and the same for choices ("c2").
+    const questions = uniqueIds(
+      data.questions.filter((q): q is FormQuestion => Boolean(q?.prompt && q?.kind)),
+      "q",
+    ).map((q) => ({
+      ...q,
+      choices: uniqueIds((q.choices ?? []).filter((c) => Boolean(c?.label)), "c"),
+      allowOther: Boolean(q.allowOther),
+      placeholder: q.placeholder ?? null,
+      scale: q.scale ?? null,
+    }));
     return { title: data.title ?? null, questions, submitLabel: data.submitLabel ?? null };
   }
   if (data.question) {
@@ -212,6 +235,17 @@ export function normalizeForm(data: Partial<AskUser> & LegacyAskUser): {
     };
   }
   return { title: null, questions: [], submitLabel: null };
+}
+
+function uniqueIds<T extends { id?: string | null }>(items: T[], prefix: string): (T & { id: string })[] {
+  const seen = new Set<string>();
+  return items.map((item, i) => {
+    let id = item.id?.trim() || `${prefix}${i + 1}`;
+    if (seen.has(id)) id = `${prefix}${i + 1}`;
+    while (seen.has(id)) id = `${id}_`;
+    seen.add(id);
+    return { ...item, id };
+  });
 }
 
 type UiRecord = {

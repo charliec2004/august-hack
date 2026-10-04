@@ -5,7 +5,7 @@ import { CheckIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { ShowPoll } from "@/lib/genui";
 import { cn } from "@/lib/utils";
-import { useLaterUserReply, useSendReply } from "./hooks";
+import { useCardAnswer, useSendReply } from "./hooks";
 
 type PollOption = ShowPoll["options"][number];
 
@@ -13,24 +13,23 @@ type PollOption = ShowPoll["options"][number];
  * A quick preference poll. One person votes, so the result is their pick, not
  * percentages. The vote is sent as their reply.
  */
-export function Poll({ data, complete = true }: { data: Partial<ShowPoll>; complete?: boolean }) {
+export function Poll({ cardId, data, complete = true }: { cardId: string | null; data: Partial<ShowPoll>; complete?: boolean }) {
   const { send, disabled } = useSendReply();
-  const reply = useLaterUserReply();
+  const answer = useCardAnswer(cardId);
   const [selected, setSelected] = useState<string[]>([]);
   const [voted, setVoted] = useState<string[] | null>(null);
   const options = (data.options ?? []).filter((o): o is PollOption => Boolean(o?.id && o?.label));
   if (!data.question || options.length === 0) return null;
 
-  const replyLower = reply?.toLowerCase() ?? null;
-  const picks =
-    voted ?? (replyLower !== null ? options.filter((o) => replyLower.includes(o.label.toLowerCase())).map((o) => o.id) : null);
+  const answered = answer?.answers.picked;
+  const picks = voted ?? (answered ? (Array.isArray(answered) ? answered : [answered]) : null);
   const done = picks !== null;
 
   const vote = (ids: string[]) => {
     const labels = options.filter((o) => ids.includes(o.id)).map((o) => o.label);
-    if (labels.length === 0) return;
+    if (labels.length === 0 || !cardId) return;
     setVoted(ids);
-    send(labels.join(", "));
+    send(labels.join(", "), { cardId, answers: { picked: ids } });
   };
   const tap = (id: string) => {
     if (!data.multi) return vote([id]);

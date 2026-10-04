@@ -1,6 +1,7 @@
 import "server-only";
 
 import { generateText, Output } from "ai";
+import { nanoid } from "nanoid";
 import { z } from "zod";
 import { query } from "@/server/db/client";
 import { listEvidence } from "@/server/db/evidence";
@@ -95,7 +96,8 @@ export async function deliverUpdate(input: {
     role: "assistant",
     // The model's history sees what the cards showed (so "I choose: X" resolves).
     content: ui ? `${text}\n\n${describeUi({ [ui.kind]: ui.data })}` : text,
-    parts: [{ type: "text", text }, ...(ui ? [{ type: `data-${ui.kind}`, data: ui.data }] : [])],
+    // Interactive cards get a stable id so only a submission of this card resolves it.
+    parts: [{ type: "text", text }, ...(ui ? [{ type: `data-${ui.kind}`, data: { id: `card_${nanoid(12)}`, ...ui.data } }] : [])],
     responsibilityId,
   });
   await trace({

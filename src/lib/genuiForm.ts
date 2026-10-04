@@ -1,6 +1,6 @@
 /**
- * Question-form answers as one readable user message, and back. The message is
- * what the model reads, so it stays plain: "How many guests? 2 · Cuisine: Italian".
+ * Question-form answers as one readable user message. The message is what the
+ * model reads, so it stays plain: "How many guests? 2 · Cuisine: Italian".
  */
 import type { FormQuestion } from "./genui";
 
@@ -51,33 +51,4 @@ export function composeFormReply(questions: FormQuestion[], answers: Record<stri
     .filter((p) => p.text !== "");
   if (questions.length === 1) return parts[0]?.text ?? "";
   return parts.map((p) => `${promptPrefix(p.q.prompt)} ${p.text}`).join(SEPARATOR);
-}
-
-/**
- * Recover per-question answers from a reply composed by `composeFormReply`.
- * Returns null when the reply wasn't one (the person typed something else).
- */
-export function parseFormReply(questions: FormQuestion[], reply: string): Record<string, string> | null {
-  if (questions.length === 1) {
-    const [q] = questions;
-    const text = reply.trim();
-    if (!text) return null;
-    // A fixed-choice question only counts as answered by a reply naming one of its choices.
-    const fixed = (q.kind === "single" || q.kind === "multi") && !q.allowOther;
-    if (fixed && !q.choices.some((c) => text.toLowerCase().includes(c.label.toLowerCase()))) return null;
-    return { [q.id]: text };
-  }
-  const found = questions
-    .map((q) => ({ q, prefix: promptPrefix(q.prompt), at: reply.indexOf(promptPrefix(q.prompt)) }))
-    .filter((f) => f.at >= 0)
-    .sort((a, b) => a.at - b.at);
-  if (found.length === 0) return null;
-  const out: Record<string, string> = {};
-  found.forEach((f, i) => {
-    const end = i + 1 < found.length ? found[i + 1].at : reply.length;
-    let value = reply.slice(f.at + f.prefix.length, end).trim();
-    if (value.endsWith(SEPARATOR.trim())) value = value.slice(0, -1).trim();
-    if (value) out[f.q.id] = value;
-  });
-  return out;
 }

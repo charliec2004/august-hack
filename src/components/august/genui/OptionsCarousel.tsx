@@ -1,21 +1,25 @@
 "use client";
 
+import { useState } from "react";
 import { ArrowUpRightIcon, CheckIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { safeUrl, type OptionCard, type ShowOptions } from "@/lib/genui";
 import { cn } from "@/lib/utils";
 import { hostOf } from "../format";
-import { CHOOSE_PREFIX, stripChoice, useLaterUserReply, useSendReply } from "./hooks";
+import { CHOOSE_PREFIX, useCardAnswer, useSendReply } from "./hooks";
 import { SafeImage } from "./SafeImage";
 
 /**
  * A horizontally scrollable row of compact option cards. "Choose this" replies
- * as the user ("I choose: <name>"); a later matching reply marks the pick.
+ * as the user ("I choose: <name>") with an answer naming this card; only that
+ * answer marks the pick.
  */
-export function OptionsCarousel({ data }: { data: Partial<ShowOptions> }) {
+export function OptionsCarousel({ cardId, data }: { cardId: string | null; data: Partial<ShowOptions> }) {
   const { send, disabled } = useSendReply();
-  const reply = useLaterUserReply();
-  const chosen = reply ? stripChoice(reply).toLowerCase() : null;
+  const answer = useCardAnswer(cardId);
+  const [picked, setPicked] = useState<string | null>(null);
+  const answered = answer?.answers.chosen;
+  const chosen = picked ?? (typeof answered === "string" ? answered : null);
   const options = (data.options ?? []).filter((o): o is OptionCard => Boolean(o?.name));
   if (options.length === 0) return null;
 
@@ -27,9 +31,14 @@ export function OptionsCarousel({ data }: { data: Partial<ShowOptions> }) {
           <OptionItem
             key={o.id ?? i}
             option={o}
-            chosen={chosen !== null && chosen === o.name.toLowerCase()}
+            chosen={chosen !== null && chosen === (o.id ?? String(i))}
             disabled={disabled || chosen !== null}
-            onChoose={() => send(`${CHOOSE_PREFIX}${o.name}`)}
+            onChoose={() => {
+              if (!cardId) return;
+              const id = o.id ?? String(i);
+              setPicked(id);
+              send(`${CHOOSE_PREFIX}${o.name}`, { cardId, answers: { chosen: id } });
+            }}
           />
         ))}
       </ul>

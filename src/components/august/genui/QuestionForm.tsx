@@ -8,12 +8,11 @@ import {
   composeFormReply,
   emptyAnswer,
   isAnswered,
-  parseFormReply,
   type FormAnswer,
 } from "@/lib/genuiForm";
 import { cn } from "@/lib/utils";
 import { ChoiceChip, ScaleControl, textFieldClass } from "./controls";
-import { useLaterUserReply, useSendReply } from "./hooks";
+import { useCardAnswer, useSendReply } from "./hooks";
 
 type Answers = Record<string, FormAnswer>;
 
@@ -22,33 +21,35 @@ type Answers = Record<string, FormAnswer>;
  * readable message; afterwards the card shows a compact summary of the answers.
  */
 export function QuestionForm({
+  cardId,
   data,
   complete = true,
 }: {
+  cardId: string | null;
   data: Partial<AskUser> & LegacyAskUser;
   complete?: boolean;
 }) {
   const { send, disabled } = useSendReply();
-  const reply = useLaterUserReply();
+  const answer = useCardAnswer(cardId);
   const [answers, setAnswers] = useState<Answers>({});
   const [sent, setSent] = useState<Record<string, string> | null>(null);
   const form = normalizeForm(data);
   const { questions } = form;
   if (questions.length === 0) return null;
 
-  const resolved = sent ?? (reply !== null ? parseFormReply(questions, reply) : null);
-  if (sent || reply !== null) {
-    return <ResolvedForm title={form.title} questions={questions} answers={resolved} />;
-  }
+  // Resolved only by a submission of this card, never by an unrelated later message.
+  const resolved = sent ?? (answer ? flatten(answer.answers) : null);
+  if (resolved) return <ResolvedForm title={form.title} questions={questions} answers={resolved} />;
 
   const update = (id: string, next: Partial<FormAnswer>) =>
     setAnswers((a) => ({ ...a, [id]: { ...(a[id] ?? emptyAnswer()), ...next } }));
 
   const submit = (all: Answers) => {
     const text = composeFormReply(questions, all);
-    if (!text) return;
-    setSent(Object.fromEntries(questions.map((q) => [q.id, answerText(q, all[q.id])]).filter(([, v]) => v)));
-    send(text);
+    if (!text || !cardId) return;
+    const answers = Object.fromEntries(questions.map((q) => [q.id, answerText(q, all[q.id])]).filter(([, v]) => v));
+    setSent(answers);
+    send(text, { cardId, answers });
   };
 
   // A lone one-of-many question answers on tap, like a quick reply.
@@ -193,7 +194,7 @@ function QuestionField({
   );
 }
 
-/** Read-only summary once answered; a form the person moved past without answering says so quietly. */
+/** Read-only summary of what was submitted. */
 function ResolvedForm({
   title,
   questions,
@@ -201,9 +202,9 @@ function ResolvedForm({
 }: {
   title: string | null;
   questions: FormQuestion[];
-  answers: Record<string, string> | null;
+  answers: Record<string, string>;
 }) {
-  const rows = answers ? questions.filter((q) => answers[q.id]) : [];
+  const rows = questions.filter((q) => answers[q.id]);
   return (
     <section aria-label={title ?? "Your answers"} className="bg-muted/40 my-3 max-w-xl rounded-2xl border px-4 py-3 text-sm">
       {title && <p className="mb-1.5 font-medium">{title}</p>}
@@ -212,15 +213,16 @@ function ResolvedForm({
           {rows.map((q) => (
             <div key={q.id} className="contents">
               <dt className="text-muted-foreground">{q.prompt}</dt>
-              <dd>{answers![q.id]}</dd>
+              <dd>{answers[q.id]}</dd>
             </div>
           ))}
         </dl>
       ) : (
-        <p className="text-muted-foreground">
-          {!title && questions.length === 1 ? `${questions[0].prompt} ` : ""}Not answered
-        </p>
+        <p className="text-muted-foreground">Sent</p>
       )}
     </section>
   );
 }
+
+const flatten = (answers: Record<string, string | string[]>): Record<string, string> =>
+  Object.fromEntries(Object.entries(answers).map(([k, v]) => [k, Array.isArray(v) ? v.join(", ") : v]));

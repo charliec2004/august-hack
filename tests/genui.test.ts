@@ -5,11 +5,12 @@ import {
   describeUi,
   MINI_APP_MAX_HTML,
   normalizeForm,
+  readAnswer,
   showAppSchema,
   stripHistoryLines,
   type FormQuestion,
 } from "../src/lib/genui";
-import { composeFormReply, emptyAnswer, isAnswered, parseFormReply } from "../src/lib/genuiForm";
+import { composeFormReply, emptyAnswer, isAnswered } from "../src/lib/genuiForm";
 import { buildMiniAppDoc, MINI_APP_CSP, parseMiniAppMessage } from "../src/lib/miniApp";
 
 const q = (over: Partial<FormQuestion>): FormQuestion => ({
@@ -40,7 +41,7 @@ const questions: FormQuestion[] = [
 ];
 
 describe("question form replies", () => {
-  it("composes one readable message and parses it back", () => {
+  it("composes one readable message", () => {
     const answers = {
       size: { ...emptyAnswer(), value: 4 },
       cuisine: { ...emptyAnswer(), picked: ["it", "mx"], text: "Thai" },
@@ -48,11 +49,6 @@ describe("question form replies", () => {
     };
     const text = composeFormReply(questions, answers);
     expect(text).toBe("How many guests? 4 of 8 · Cuisine: Italian, Mexican, Thai · Anything else: window seat");
-    expect(parseFormReply(questions, text)).toEqual({
-      size: "4 of 8",
-      cuisine: "Italian, Mexican, Thai",
-      notes: "window seat",
-    });
   });
 
   it("skips unanswered optional text and requires choices and scales", () => {
@@ -68,13 +64,18 @@ describe("question form replies", () => {
   it("replies to a single question with just the answer", () => {
     const one = [questions[1]];
     expect(composeFormReply(one, { cuisine: { ...emptyAnswer(), picked: ["mx"] } })).toBe("Mexican");
-    expect(parseFormReply(one, "Mexican")).toEqual({ cuisine: "Mexican" });
-    const fixed = [{ ...questions[1], allowOther: false }];
-    expect(parseFormReply(fixed, "Show me a poll instead")).toBeNull();
   });
 
-  it("returns null for a reply that wasn't from the form", () => {
-    expect(parseFormReply(questions, "actually let's skip it")).toBeNull();
+});
+
+describe("card answers", () => {
+  it("reads only well-formed answers", () => {
+    expect(readAnswer({ cardId: "call_1", answers: { picked: ["a", 2], q1: "Italian" } })).toEqual({
+      cardId: "call_1",
+      answers: { picked: ["a"], q1: "Italian" },
+    });
+    expect(readAnswer({ answers: {} })).toBeNull();
+    expect(readAnswer("call_1")).toBeNull();
   });
 });
 
@@ -86,8 +87,33 @@ describe("normalizeForm", () => {
     expect(form.questions[0].choices.map((c) => c.label)).toEqual(["Fri", "Sat"]);
   });
 
+  it("makes question and choice ids unique", () => {
+    const form = normalizeForm({
+      title: null,
+      submitLabel: null,
+      questions: [
+        q({ id: "", prompt: "Who's coming?", kind: "text" }),
+        q({ id: "notes", prompt: "Dietary needs?", kind: "text" }),
+        q({ id: "notes", prompt: "Any limits?", kind: "text" }),
+        q({
+          id: "q1",
+          prompt: "Vibe",
+          kind: "multi",
+          choices: [
+            { id: "a", label: "Cozy", detail: null },
+            { id: "a", label: "Festive", detail: null },
+          ],
+        }),
+      ],
+    });
+    const ids = form.questions.map((x) => x.id);
+    expect(new Set(ids).size).toBe(4);
+    expect(ids.slice(0, 3)).toEqual(["q1", "notes", "q3"]);
+    expect(form.questions[3].choices.map((c) => c.id)).toEqual(["a", "c2"]);
+  });
+
   it("drops partial streaming questions", () => {
-    const form = normalizeForm({ title: null, questions: [questions[0], { id: "x" } as FormQuestion] });
+    const form = normalizeForm({ title: null, questions: [questions[0], { id: "x" } as FormQuestion], submitLabel: null });
     expect(form.questions.map((x) => x.id)).toEqual(["size"]);
   });
 
