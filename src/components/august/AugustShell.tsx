@@ -147,10 +147,9 @@ export function AugustShell() {
       <div className="bg-background flex h-dvh flex-col">
         <AugustRenderers />
         <RefetchAfterChat />
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4 md:px-5">
-          <h1 className="font-heading text-[1.35rem] leading-none font-medium tracking-tight">
-            August
-          </h1>
+        {/* Mobile only: the rail is a sheet, so it needs a way in. Desktop has no top bar. */}
+        <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4 md:hidden">
+          <h1 className="text-base font-semibold">August</h1>
           <ConnectionIndicator connection={connection} />
           <div className="flex-1" />
           <Button
@@ -172,6 +171,10 @@ export function AugustShell() {
 
         <div className="flex min-h-0 flex-1">
           <aside className="bg-sidebar hidden w-[280px] shrink-0 flex-col border-r md:flex">
+            <div className="flex items-center gap-2 px-5 pt-4">
+              <span className="text-[15px] font-semibold">August</span>
+              <ConnectionIndicator connection={connection} />
+            </div>
             {rail}
           </aside>
           <main className="min-w-0 flex-1">

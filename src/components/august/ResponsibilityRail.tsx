@@ -96,7 +96,7 @@ function FinishedSection({
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="text-muted-foreground hover:text-foreground flex items-center gap-1 px-3 py-1.5 text-sm transition-colors"
+        className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex items-center gap-1 rounded-md px-3 py-1.5 text-sm transition-colors outline-none focus-visible:ring-2"
       >
         <ChevronUpIcon className={cn("size-3.5 transition-transform", open && "rotate-180")} />
         Finished
