@@ -166,6 +166,8 @@ export type TimelineApprovalData = { effectId: string };
 
 /** GET /api/state: one poll endpoint for the whole shell. */
 export type AugustState = {
+  /** Who is signed in. */
+  viewer: { name: string; email: string | null };
   responsibilities: ResponsibilityView[];
   /** Every recent user-facing effect (48h, newest 50), pending and resolved. */
   approvals: ApprovalView[];

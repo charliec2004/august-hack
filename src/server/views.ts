@@ -96,6 +96,7 @@ export async function buildState(userId: string): Promise<AugustState> {
     latestMessageId: latest.rows[0]?.id ?? null,
     demoControls: process.env.AUGUST_ENV !== "production",
     serverTime: new Date().toISOString(),
+    viewer: { name: process.env.DEMO_USER_NAME ?? "You", email: process.env.DEMO_USER_EMAIL ?? null },
   };
 }
 

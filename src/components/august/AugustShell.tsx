@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import type { LiveBrowser } from "@/server/types/api";
 import { AppSurfaces } from "./AppSurfaces";
 import { LoadEarlier } from "./LoadEarlier";
+import { ProfileRow } from "./ProfileRow";
 import { BrowserLiveView, type LiveViewTarget } from "./BrowserLiveView";
 import { ComputerPanel } from "./ComputerPanel";
 import { ConnectionsPanel } from "./ConnectionsPanel";
@@ -137,6 +138,7 @@ export function AugustShell() {
         <>
           <AppSurfaces active={panel} onOpen={openPanel} />
           {showReset ? <DemoControls /> : null}
+          <ProfileRow />
         </>
       }
     />

@@ -338,6 +338,7 @@ function minutesFromNow(m: number): string {
 
 function mockState(): AugustState {
   return {
+    viewer: { name: "Charlie Conner", email: "charlieconner04@gmail.com" },
     serverTime: new Date().toISOString(),
     demoControls: true,
     latestMessageId: null,
