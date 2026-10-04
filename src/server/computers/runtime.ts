@@ -107,11 +107,13 @@ async function setLifecycle(id: string, lifecycle: ComputerLifecycle): Promise<v
   );
 }
 
-async function findLive(args: {
-  userId: string;
-  responsibilityId: string;
-  workerSessionId: string | null;
-}): Promise<ComputerRow | null> {
+/**
+ * Who a Computer belongs to: a worker session, else the Brain for one
+ * responsibility, else (both null) the user's own console from the Computer panel.
+ */
+type ComputerScope = { userId: string; responsibilityId: string | null; workerSessionId: string | null };
+
+async function findLive(args: ComputerScope): Promise<ComputerRow | null> {
   const { rows } = args.workerSessionId
     ? await query<ComputerRow>(
         `select id, user_id, responsibility_id, worker_session_id, provider_ref, lifecycle, pinned_generation
@@ -122,7 +124,7 @@ async function findLive(args: {
     : await query<ComputerRow>(
         `select id, user_id, responsibility_id, worker_session_id, provider_ref, lifecycle, pinned_generation
            from computers
-          where user_id = $1 and worker_session_id is null and responsibility_id = $2
+          where user_id = $1 and worker_session_id is null and responsibility_id is not distinct from $2::uuid
             and lifecycle in ('provisioning','running','dormant')
           order by created_at desc limit 1`,
         [args.userId, args.responsibilityId],
@@ -175,11 +177,7 @@ async function restoreEnvironment(
  * positive provider readback; a vanished Sprite is marked `lost` and replaced
  * with a fresh one restored from canonical state.
  */
-export async function acquireComputer(args: {
-  userId: string;
-  responsibilityId: string;
-  workerSessionId: string | null;
-}, deps: { sprites?: SpritesPort | null } = {}): Promise<ToolResult<ComputerLease>> {
+export async function acquireComputer(args: ComputerScope, deps: { sprites?: SpritesPort | null } = {}): Promise<ToolResult<ComputerLease>> {
   const sprites = deps.sprites === undefined ? getSpritesProvider() : deps.sprites;
   if (!sprites) return blockedOrFailed("start a computer", NOT_CONFIGURED);
 
@@ -204,11 +202,16 @@ export async function acquireComputer(args: {
     // lost: fall through and replace it. Canonical state is untouched.
   }
 
-  const scope = args.workerSessionId ? `session:${args.workerSessionId}` : `brain:${args.userId}:${args.responsibilityId}`;
+  const scope = args.workerSessionId
+    ? `session:${args.workerSessionId}`
+    : args.responsibilityId
+      ? `brain:${args.userId}:${args.responsibilityId}`
+      : `console:${args.userId}`;
   const count = args.workerSessionId
     ? await query<{ n: number }>(`select count(*)::int as n from computers where worker_session_id = $1`, [args.workerSessionId])
     : await query<{ n: number }>(
-        `select count(*)::int as n from computers where user_id = $1 and responsibility_id = $2 and worker_session_id is null`,
+        `select count(*)::int as n from computers
+          where user_id = $1 and responsibility_id is not distinct from $2::uuid and worker_session_id is null`,
         [args.userId, args.responsibilityId],
       );
   const name = spriteNameForSession(scope, count.rows[0].n + 1);

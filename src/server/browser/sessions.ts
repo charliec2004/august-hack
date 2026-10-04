@@ -17,7 +17,8 @@ import { attachLeaseSession, openProfile, releaseProfileLease } from "./profiles
  * activity lines carry our row id (browserSessionId), never the raw URL.
  */
 
-export type BrowserSessionKind = "task" | "run";
+/** task: one tool call; run: a worker run's browser; user: opened by the user from the Computer panel. */
+export type BrowserSessionKind = "task" | "run" | "user";
 
 export type OpenedBrowser = {
   /** Our browser_sessions row id (safe to put in trace detail). */
@@ -65,15 +66,21 @@ export async function openBrowserSession(args: {
   stealth?: boolean;
 }): Promise<OpenedBrowser> {
   const profile = args.withProfile
-    ? await openProfile({ userId: args.userId, workerRunId: args.workerRunId, owner: `browser:${args.workerRunId ?? "task"}` })
+    ? await openProfile({ userId: args.userId, workerRunId: args.workerRunId, owner: `browser:${args.workerRunId ?? args.kind}` })
     : null;
 
-  const ins = await query<{ id: string }>(
-    `insert into browser_sessions (user_id, responsibility_id, worker_run_id, kind, browser_profile_id, profile_lease_id, status)
-     values ($1, $2, $3, $4, $5, $6, 'opening') returning id`,
-    [args.userId, args.responsibilityId, args.workerRunId, args.kind, profile?.profileId ?? null, profile?.leaseId ?? null],
-  );
-  const id = ins.rows[0].id;
+  let id: string;
+  try {
+    const ins = await query<{ id: string }>(
+      `insert into browser_sessions (user_id, responsibility_id, worker_run_id, kind, browser_profile_id, profile_lease_id, status)
+       values ($1, $2, $3, $4, $5, $6, 'opening') returning id`,
+      [args.userId, args.responsibilityId, args.workerRunId, args.kind, profile?.profileId ?? null, profile?.leaseId ?? null],
+    );
+    id = ins.rows[0].id;
+  } catch (err) {
+    if (profile?.leaseId) await releaseProfileLease(profile.leaseId);
+    throw err;
+  }
 
   try {
     const created = await kernel().browsers.create({
