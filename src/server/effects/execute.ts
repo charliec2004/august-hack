@@ -109,6 +109,13 @@ export async function executeEffect(userId: string, effectId: string): Promise<D
   return result;
 }
 
+/** User-facing receipt sentence. Provider summaries (ids, codes) stay in the receipt row. */
+const RECEIPT_TEXT: Record<DispatchResult["outcome"], string> = {
+  succeeded: "Confirmed it went through",
+  failed: "That didn't go through",
+  uncertain: "Checking whether that went through",
+};
+
 async function recordReceipt(effect: AuthorizedEffect, result: DispatchResult) {
   await tx(async (c) => {
     await c.query(
@@ -133,7 +140,7 @@ async function recordReceipt(effect: AuthorizedEffect, result: DispatchResult) {
       userId: effect.userId,
       responsibilityId: effect.responsibilityId,
       kind: `effect.${result.outcome}`,
-      detail: { effectId: effect.id, text: result.safeSummary },
+      detail: { effectId: effect.id, text: RECEIPT_TEXT[result.outcome], providerSummary: result.safeSummary },
       evidenceRefs: result.evidenceRefs,
     });
   });
@@ -141,7 +148,7 @@ async function recordReceipt(effect: AuthorizedEffect, result: DispatchResult) {
     userId: effect.userId,
     responsibilityId: effect.responsibilityId,
     kind: "effect.receipt",
-    detail: { effectId: effect.id, outcome: result.outcome, text: result.safeSummary },
+    detail: { effectId: effect.id, outcome: result.outcome, text: RECEIPT_TEXT[result.outcome] },
   });
 }
 

@@ -7,13 +7,13 @@ import {
   useChatRuntime,
   AssistantChatTransport,
 } from "@assistant-ui/ai-sdk";
-import { lastAssistantMessageIsCompleteWithToolCalls, type UIMessage } from "ai";
+import type { UIMessage } from "ai";
 import { AugustShell } from "@/components/august/AugustShell";
 import { AugustProvider, useAugust } from "@/components/august/useAugustState";
 
 export const Assistant = () => {
+  // All of August's tools run server-side, so the client never auto-resends.
   const runtime = useChatRuntime({
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
     transport: new AssistantChatTransport({
       api: "/api/chat",
     }),
@@ -64,6 +64,7 @@ function ConversationSync() {
           return;
         }
         chat.setMessages(rows);
+        chat.clearError();
         synced.current = latest;
       } catch {
         // Network hiccup: try again on the next poll.

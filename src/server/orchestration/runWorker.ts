@@ -216,6 +216,13 @@ async function settle(userId: string, responsibilityId: string, report: WorkerRe
       ? new Date(Math.max(requested.getTime(), minDue))
       : new Date(Date.now() + FALLBACK_WAKE_MS);
   const existing = await nextPendingWake(userId, responsibilityId);
+  const due = existing ? existing.due_at : dueAt;
+  const { rows: tzRows } = await query<{ timezone: string }>(`select timezone from app_users where id = $1`, [userId]);
+  const dueLocal = due.toLocaleTimeString("en-US", {
+    timeZone: tzRows[0]?.timezone ?? "UTC",
+    hour: "numeric",
+    minute: "2-digit",
+  });
   await tx(async (c) => {
     if (!existing) {
       await scheduleWake(c, { userId, responsibilityId, source: "schedule", causeRef: "worker_wait", dueAt });
@@ -224,16 +231,16 @@ async function settle(userId: string, responsibilityId: string, report: WorkerRe
       userId,
       responsibilityId,
       to: resp.waiting_on?.startsWith("mail:") ? "waiting_external" : "scheduled",
-      nextWakeAt: existing ? existing.due_at : dueAt,
+      nextWakeAt: due,
       nextAction: report.nextSuggestedAction,
-      eventText: `Will check again at ${(existing ? existing.due_at : dueAt).toISOString()}`,
+      eventText: `Will check again at ${dueLocal}`,
     });
   });
   await trace({
     userId,
     responsibilityId,
     kind: "wake.scheduled",
-    detail: { text: "Will check again later", dueAt: (existing ? existing.due_at : dueAt).toISOString() },
+    detail: { text: `Will check again at ${dueLocal}`, dueAt: due.toISOString() },
   });
   await deliverUpdate({ userId, responsibilityId, kind: "waiting", report });
   return "scheduled";
