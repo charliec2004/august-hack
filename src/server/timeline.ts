@@ -13,7 +13,8 @@ import type {
   TimelineApprovalData,
 } from "@/server/types/api";
 
-const MESSAGE_LIMIT = 60;
+const DEFAULT_MESSAGES = 60;
+const MAX_MESSAGES = 2000;
 const ACTIVITY_LIMIT = 400;
 
 type Entry =
@@ -92,7 +93,11 @@ function renderableParts(m: MessageRow): Part[] {
  * `data-activity` parts, and each user-facing effect as a `data-approval` part
  * at the moment it was proposed.
  */
-export async function buildTimeline(userId: string): Promise<UIMessage[]> {
+export async function buildTimeline(
+  userId: string,
+  opts: { limit?: number } = {},
+): Promise<{ messages: UIMessage[]; hasEarlier: boolean }> {
+  const MESSAGE_LIMIT = Math.min(Math.max(opts.limit ?? DEFAULT_MESSAGES, 1), MAX_MESSAGES);
   const threadId = await ensurePrimaryThread(userId);
   const messages = (await recentMessages(userId, threadId, MESSAGE_LIMIT)).filter((m) => m.role !== "system");
   // A full page of messages bounds the window; otherwise show everything recent.
@@ -108,7 +113,8 @@ export async function buildTimeline(userId: string): Promise<UIMessage[]> {
     ...messages.map((m): Entry => ({ at: m.created_at.getTime(), kind: "message", message: m })),
     ...activity.map((item): Entry => ({ at: Date.parse(item.at), kind: "activity", item })),
     ...effects
-      .filter((e) => !since || e.created_at >= since)
+      // A user-edited replacement renders in its original's card, not as a second card.
+      .filter((e) => !e.supersedes_effect_id && (!since || e.created_at >= since))
       .map(
         (e): Entry => ({
           at: e.created_at.getTime(),
@@ -172,5 +178,5 @@ export async function buildTimeline(userId: string): Promise<UIMessage[]> {
     });
   }
   flush();
-  return out;
+  return { messages: out, hasEarlier: messages.length >= MESSAGE_LIMIT };
 }

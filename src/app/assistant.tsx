@@ -9,6 +9,7 @@ import {
 } from "@assistant-ui/ai-sdk";
 import type { UIMessage } from "ai";
 import { AugustShell } from "@/components/august/AugustShell";
+import { useHistory } from "@/components/august/history";
 import { isGenUiTool } from "@/lib/genui";
 import { AugustProvider, useAugust } from "@/components/august/useAugustState";
 
@@ -39,7 +40,9 @@ export const Assistant = () => {
 function ConversationSync() {
   const { state, mock } = useAugust();
   const chat = useAISDKChat();
-  const version = state?.timelineVersion ?? null;
+  const { limit, nonce, setHasEarlier } = useHistory();
+  // Re-sync on new timeline data, and when the user asks for earlier history.
+  const version = state ? `${state.timelineVersion}:${nonce}` : null;
   const synced = useRef<string | null | undefined>(undefined);
   const busy = useRef(false);
   const streaming = chat?.status === "submitted" || chat?.status === "streaming";
@@ -50,7 +53,8 @@ function ConversationSync() {
     busy.current = true;
     void (async () => {
       try {
-        const res = await fetch("/api/messages", { cache: "no-store" });
+        const res = await fetch(`/api/messages?limit=${limit}`, { cache: "no-store" });
+        setHasEarlier(res.headers.get("x-has-earlier") === "1");
         if (!res.ok) {
           synced.current = version; // no history available; don't hammer it
           return;
@@ -72,7 +76,7 @@ function ConversationSync() {
         busy.current = false;
       }
     })();
-  }, [chat, mock, state, version, streaming]);
+  }, [chat, mock, state, version, streaming, limit, setHasEarlier]);
 
   return null;
 }

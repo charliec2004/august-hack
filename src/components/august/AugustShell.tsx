@@ -21,6 +21,7 @@ import {
 import { Button } from "@/components/ui/button";
 import type { LiveBrowser } from "@/server/types/api";
 import { AppSurfaces } from "./AppSurfaces";
+import { LoadEarlier } from "./LoadEarlier";
 import { BrowserLiveView, type LiveViewTarget } from "./BrowserLiveView";
 import { ComputerPanel } from "./ComputerPanel";
 import { ConnectionsPanel } from "./ConnectionsPanel";
@@ -113,6 +114,7 @@ export function AugustShell() {
       ToolFallback: QuietTool,
       ToolGroup: PlainGroup,
       ReasoningGroup: HiddenGroup,
+      BeforeMessages: LoadEarlier,
       composerPlaceholder: "Hand August something to take care of…",
     }),
     [],

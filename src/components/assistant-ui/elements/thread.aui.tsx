@@ -84,6 +84,7 @@ export type ThreadComponents = {
     | undefined;
   TaskGroup?: ComponentType<{ group: ThreadGroupPart }> | undefined;
   /** Rendered in the scroll area directly after the messages. */
+  BeforeMessages?: ComponentType | undefined;
   AfterMessages?: ComponentType | undefined;
   /** Rendered in the sticky footer directly above the composer. */
   BeforeComposer?: ComponentType | undefined;
@@ -184,6 +185,7 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
 }) => {
   const {
     Welcome = ThreadWelcome,
+    BeforeMessages,
     AfterMessages,
     BeforeComposer,
   } = useContext(ThreadComponentsContext);
@@ -217,6 +219,7 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
             <ThreadHistorySkeleton />
           </AuiIf>
 
+          {BeforeMessages && <BeforeMessages />}
           <div
             data-slot="aui_message-group"
             className="mb-14 flex flex-col gap-y-6 empty:hidden"
