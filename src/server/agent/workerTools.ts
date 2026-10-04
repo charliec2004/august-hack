@@ -134,16 +134,16 @@ export function workerTools(ctx: WorkerToolContext) {
     tools.connected_app_read = createTool({
       id: "connected_app_read",
       description:
-        "Read-only question to the user's connected apps (e.g. Google Calendar). Describe what to read; never use for changes.",
-      inputSchema: z.object({ intent: z.string().min(5) }),
-      execute: async ({ intent }) => {
+        "Read-only TypeScript program run against the user's connected apps in Executor's sandbox. Use `tools.search({query})` and `tools.describe.tool({path})` to discover, then call read tools, e.g. `return await tools.google_calendar.user.personalGoogleCalendarApi.calendar.events.list({calendarId:'primary', timeMin, timeMax, singleEvents:true, orderBy:'startTime'})`. Never mutate.",
+      inputSchema: z.object({ program: z.string().min(10).describe("Async function body; must `return` the result") }),
+      execute: async ({ program }) => {
         budget();
         return executorRead({
           userId: ctx.userId,
           responsibilityId: ctx.responsibilityId,
-          intent,
+          program,
           activityText: "Checked your apps",
-        } as Parameters<typeof executorRead>[0]);
+        });
       },
     });
   }
@@ -164,7 +164,7 @@ export function workerTools(ctx: WorkerToolContext) {
           responsibilityId: ctx.responsibilityId,
           url,
           instruction,
-          onLiveView: async (liveUrl: string | null) => {
+          onLiveView: async (liveUrl: string) => {
             await setLiveView(ctx.runId, liveUrl);
           },
         });
@@ -176,24 +176,38 @@ export function workerTools(ctx: WorkerToolContext) {
     tools.propose_browser_action = createTool({
       id: "propose_browser_action",
       description:
-        "Propose a consequential website action (book, reserve, submit). Observes the material facts first; executes only if authorized.",
+        "Propose a consequential website action (book, reserve, submit). The browser fills non-committing fields, reads the material facts from the page, and freezes them; the final click happens only if authorized and the facts are unchanged. Selectors are Playwright selectors (e.g. 'text=Reserve', 'button:has-text(\"Book\")', '#party-size').",
       inputSchema: z.object({
         url: z.string().url(),
         action: z.enum(["book", "submit_form"]),
-        instruction: z.string().describe("Exactly what to fill and which final button to press"),
+        steps: z
+          .array(z.union([z.object({ selector: z.string(), value: z.string() }), z.object({ click: z.string() })]))
+          .default([])
+          .describe("Non-committing steps: fill fields, open dialogs, pick a time"),
+        commitSelector: z.string().optional().describe("The final committing control, if known"),
+        commitText: z.string().optional().describe("Visible text of the final button, e.g. 'Reserve'"),
+        factSelectors: z
+          .record(z.string(), z.string())
+          .optional()
+          .describe("Named selectors whose text is a material fact: business, time, partySize, price, terms"),
         expectedFacts: z
-          .record(z.string(), z.unknown())
-          .describe("Material facts you expect: business, date/time, party size, price, terms"),
+          .record(z.string(), z.string())
+          .optional()
+          .describe("Material facts you expect to see on the page (used when selectors are unknown)"),
+        confirmationSelector: z.string().optional(),
       }),
       execute: async (args) => {
         budget();
-        const draft = await browserPrepareCommit({
+        const res = await browserPrepareCommit({
           userId: ctx.userId,
           responsibilityId: ctx.responsibilityId,
           ...args,
-        } as Parameters<typeof browserPrepareCommit>[0]);
-        if (!("provider" in draft)) return draft;
-        return propose(draft, "booking");
+          onLiveView: async (liveUrl: string) => {
+            await setLiveView(ctx.runId, liveUrl);
+          },
+        });
+        if (res.status !== "succeeded" || !res.data) return res;
+        return propose(res.data, "booking");
       },
     });
   }
@@ -231,7 +245,7 @@ export function workerTools(ctx: WorkerToolContext) {
           [ctx.userId, ctx.responsibilityId, threadId],
         );
         if (!linked.rowCount) return { status: "blocked", safeSummary: "That thread isn't linked to this task." };
-        return mailReadThread(threadId);
+        return mailReadThread({ userId: ctx.userId, responsibilityId: ctx.responsibilityId, threadId });
       },
     });
   }
@@ -252,8 +266,8 @@ export function workerTools(ctx: WorkerToolContext) {
           responsibilityId: ctx.responsibilityId,
           workerSessionId: ctx.workerSessionId,
         });
-        if (!("leaseRef" in lease || "computerId" in lease)) return lease;
-        return runOnComputer({ lease: lease as never, command, timeoutMs });
+        if (lease.status !== "succeeded" || !lease.data) return lease;
+        return runOnComputer({ lease: lease.data, command, timeoutMs });
       },
     });
     tools.computer_environment = createTool({
@@ -301,8 +315,8 @@ export function workerTools(ctx: WorkerToolContext) {
           responsibilityId: ctx.responsibilityId,
           workerSessionId: ctx.workerSessionId,
         });
-        if (!("leaseRef" in lease || "computerId" in lease)) return lease;
-        const draft = await prepareComputerExternal({ lease: lease as never, command, materialFacts });
+        if (lease.status !== "succeeded" || !lease.data) return lease;
+        const draft = prepareComputerExternal({ lease: lease.data, command, materialFacts });
         return propose(draft, "computer action");
       },
     });
@@ -311,13 +325,23 @@ export function workerTools(ctx: WorkerToolContext) {
       description: "Release your computer when the task no longer needs it.",
       inputSchema: z.object({}),
       execute: async () => {
-        const lease = await acquireComputer({
+        const { rows } = await query<{ id: string; provider_ref: string; pinned_generation: number }>(
+          `select id, provider_ref, pinned_generation from computers
+            where user_id = $1 and worker_session_id = $2 and lifecycle in ('provisioning','running','dormant')
+            limit 1`,
+          [ctx.userId, ctx.workerSessionId],
+        );
+        const c = rows[0];
+        if (!c) return { status: "succeeded", safeSummary: "No computer to release." };
+        return releaseComputer({
+          computerId: c.id,
           userId: ctx.userId,
           responsibilityId: ctx.responsibilityId,
           workerSessionId: ctx.workerSessionId,
+          spriteName: c.provider_ref,
+          pinnedGeneration: c.pinned_generation,
+          reused: true,
         });
-        if (!("leaseRef" in lease || "computerId" in lease)) return lease;
-        return releaseComputer(lease as never);
       },
     });
   }
