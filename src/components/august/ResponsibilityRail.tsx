@@ -1,6 +1,8 @@
 "use client";
 
-import { ChevronRightIcon } from "lucide-react";
+import { useState } from "react";
+import { ChevronUpIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
 import type { ResponsibilityView } from "@/server/types/api";
 import { isFinished, sortResponsibilities } from "./format";
 import { ResponsibilityRow } from "./ResponsibilityRow";
@@ -48,30 +50,58 @@ export function ResponsibilityRail({
                 />
               ))}
             </ul>
-            {done.length > 0 && (
-              <details className="group/done mt-6">
-                <summary className="text-muted-foreground hover:text-foreground flex cursor-pointer list-none items-center gap-1 px-3 py-1 text-sm transition-colors [&::-webkit-details-marker]:hidden">
-                  <ChevronRightIcon className="size-3.5 transition-transform group-open/done:rotate-90" />
-                  Finished
-                </summary>
-                <ul className="mt-1 flex flex-col gap-0.5">
-                  {done.map((r) => (
-                    <ResponsibilityRow
-                      key={r.id}
-                      responsibility={r}
-                      selected={r.id === selectedId}
-                      onOpen={() => onOpen(r.id)}
-                      onWatch={() => onWatch(r.id)}
-                    />
-                  ))}
-                </ul>
-              </details>
-            )}
           </>
         )}
       </div>
+      {!loading && done.length > 0 && (
+        <FinishedSection done={done} selectedId={selectedId} onOpen={onOpen} onWatch={onWatch} />
+      )}
       {footer}
     </nav>
+  );
+}
+
+/**
+ * Finished items, pinned to the bottom of the rail and opening upward, so
+ * active work keeps the top and history stays out of the way.
+ */
+function FinishedSection({
+  done,
+  selectedId,
+  onOpen,
+  onWatch,
+}: {
+  done: ResponsibilityView[];
+  selectedId: string | null;
+  onOpen: (id: string) => void;
+  onWatch: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex max-h-[45%] shrink-0 flex-col px-2 pb-1">
+      {open && (
+        <ul className="mb-1 flex min-h-0 flex-col gap-0.5 overflow-y-auto">
+          {done.map((r) => (
+            <ResponsibilityRow
+              key={r.id}
+              responsibility={r}
+              selected={r.id === selectedId}
+              onOpen={() => onOpen(r.id)}
+              onWatch={() => onWatch(r.id)}
+            />
+          ))}
+        </ul>
+      )}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="text-muted-foreground hover:text-foreground flex items-center gap-1 px-3 py-1.5 text-sm transition-colors"
+      >
+        <ChevronUpIcon className={cn("size-3.5 transition-transform", open && "rotate-180")} />
+        Finished
+      </button>
+    </div>
   );
 }
 
