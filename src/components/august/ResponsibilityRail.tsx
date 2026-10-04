@@ -35,7 +35,7 @@ export function ResponsibilityRail({
           <RailSkeleton />
         ) : open.length === 0 && done.length === 0 ? (
           <p className="text-muted-foreground px-3 py-2 text-sm leading-relaxed">
-            Nothing yet.
+            No tasks yet
           </p>
         ) : (
           <>
