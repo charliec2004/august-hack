@@ -4,7 +4,7 @@ import { defineConfig } from "@neon/config/v1";
 // Functions host backend-owned async work (wake scanning, webhooks).
 export default defineConfig({
   auth: true,
-  // aiGateway: true,  // re-enable once the Neon org is on a paid plan (D2)
+  aiGateway: true,
   buckets: {
     "august-artifacts": { access: "private" },
   },

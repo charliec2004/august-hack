@@ -5,6 +5,8 @@ import { trace } from "@/server/db/traces";
 import { kickResponsibility } from "@/server/orchestration/wakes";
 import { normalizeAgentMailEvent, verifyAgentMailWebhook } from "@/server/providers/agentmail";
 
+export const maxDuration = 300;
+
 /**
  * AgentMail inbound webhook (spec 21, 41.4): verify -> dedupe by event id ->
  * persist a safe provider event -> map thread to responsibility -> wake.

@@ -12,7 +12,7 @@ import { currentUser } from "@/server/auth/currentUser";
 import { ensurePrimaryThread, insertMessage, recentMessages } from "@/server/db/messages";
 import { trace } from "@/server/db/traces";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 function textOf(m: UIMessage | undefined): string {
   if (!m) return "";

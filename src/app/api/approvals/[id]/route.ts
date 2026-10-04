@@ -9,6 +9,8 @@ const body = z.object({
 });
 
 /** Approve or deny one exact frozen effect. Identity is server-derived. */
+export const maxDuration = 300;
+
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   const parsed = body.safeParse(await req.json().catch(() => null));
