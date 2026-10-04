@@ -21,12 +21,7 @@ export function ProfileRow() {
       >
         {initials}
       </span>
-      <div className="min-w-0">
-        <p className="truncate text-sm leading-tight">{name}</p>
-        {state?.viewer.email && (
-          <p className="text-muted-foreground truncate text-xs leading-tight">{state.viewer.email}</p>
-        )}
-      </div>
+      <p className="min-w-0 truncate text-sm">{name}</p>
     </div>
   );
 }
