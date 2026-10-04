@@ -85,6 +85,14 @@ export async function POST(req: Request) {
   });
 
   return createUIMessageStreamResponse({
-    stream: toAISdkStream(stream, { from: "agent", version: "v7" }),
+    stream: toAISdkStream(stream, {
+      from: "agent",
+      version: "v7",
+      // Never send provider errors or stacks to the browser.
+      onError: (err) => {
+        console.error("brain turn failed:", (err as Error)?.message ?? err);
+        return "I hit a problem thinking about that. Your message is saved; please try again in a moment.";
+      },
+    }),
   });
 }
