@@ -164,3 +164,13 @@ describe("mini app", () => {
     expect(showAppSchema.safeParse({ title: "Big", html: big, height: null }).success).toBe(false);
   });
 });
+
+import { titleMentions } from "../src/components/august/genui/chart/Chart";
+describe("chart title unit", () => {
+  it("skips the parenthetical when the title already names the unit", () => {
+    expect(titleMentions("Daily steps", "steps")).toBe(true);
+    expect(titleMentions("Steps per day", "step")).toBe(true);
+    expect(titleMentions("Average high temperature", "°F")).toBe(false);
+    expect(titleMentions("Monthly spending", "USD")).toBe(false);
+  });
+});

@@ -26,7 +26,9 @@ export function Chart({ data }: { data: Partial<ShowChart> }) {
       <div className="flex items-start justify-between gap-3">
         <figcaption className="text-sm leading-snug font-medium">
           {data.title}
-          {unit && <span className="text-muted-foreground font-normal"> ({unit})</span>}
+          {unit && !titleMentions(data.title, unit) && (
+            <span className="text-muted-foreground font-normal"> ({unit})</span>
+          )}
         </figcaption>
         <button
           type="button"
@@ -138,4 +140,11 @@ function useWidth<T extends HTMLElement>(): [(el: T | null) => void, number] {
     return () => ro.disconnect();
   }, [el]);
   return [setEl, width];
+}
+
+/** "Daily steps" already says "steps": don't append "(steps)". Handles simple plurals. */
+export function titleMentions(title: string, unit: string): boolean {
+  const stem = (w: string) => w.toLowerCase().replace(/[^a-z0-9%$°]/g, "").replace(/(es|s)$/, "");
+  const words = new Set(title.split(/\s+/).map(stem));
+  return unit.split(/\s+/).map(stem).every((w) => w === "" || words.has(w));
 }
