@@ -60,6 +60,7 @@ import {
   type FC,
   type PropsWithChildren,
 } from "react";
+import { WorkingIndicator } from "@/components/august/genui/WorkingIndicator";
 
 export type ThreadGroupPart = MessagePrimitive.GroupedParts.GroupPart;
 
@@ -580,6 +581,7 @@ const AssistantMessage: FC = () => {
             }
           }}
         </MessagePrimitive.GroupedParts>
+        <WorkingIndicator />
         <MessageError />
       </div>
 

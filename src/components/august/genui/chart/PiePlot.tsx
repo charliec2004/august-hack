@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Slice } from "./data";
-import { arcPath, formatValue, seriesColor } from "./scale";
+import { arcPath, formatTick, isCompactAxis, seriesColor } from "./scale";
 
 const SIZE = 168;
 
@@ -39,7 +39,7 @@ export function PiePlot({ slices, unit }: { slices: Slice[]; unit: string | null
           ))}
         </svg>
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
-          <span className="text-sm font-medium tabular-nums">{formatValue(shown?.value ?? total, unit, true)}</span>
+          <span className="text-sm font-medium tabular-nums">{formatTick(shown?.value ?? total, unit, isCompactAxis([total]))}</span>
           <span className="text-muted-foreground max-w-20 truncate text-xs">{shown ? shown.label : "Total"}</span>
         </div>
       </div>

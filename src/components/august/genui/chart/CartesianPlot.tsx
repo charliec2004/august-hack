@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { categories, numericX, valueAt, type Series } from "./data";
-import { barPath, formatValue, linear, niceTicks, seriesColor } from "./scale";
+import { barPath, formatTick, formatValue, linear, niceTicks, seriesColor, isCompactAxis } from "./scale";
 import { ChartTooltip, type TooltipState } from "./ChartTooltip";
 
 const HEIGHT = 208;
@@ -35,7 +35,8 @@ export function CartesianPlot({
   if (kind === "bar" || (yMin >= 0 && yMin < yMax * 0.5)) yMin = Math.min(0, yMin);
   if (kind === "bar") yMax = Math.max(0, yMax);
   const yTicks = niceTicks(yMin, yMax, 5);
-  const tickLabels = yTicks.map((t) => formatValue(t, unit, true));
+  const yCompact = isCompactAxis(yTicks);
+  const tickLabels = yTicks.map((t) => formatTick(t, unit, yCompact));
   const left = Math.max(...tickLabels.map((l) => l.length)) * 6.4 + 12;
   const innerW = Math.max(width - left - RIGHT, 40);
   const y = linear([yTicks[0], yTicks[yTicks.length - 1]], [HEIGHT - BOTTOM, TOP]);
@@ -55,15 +56,15 @@ export function CartesianPlot({
   const every = Math.max(1, Math.ceil((labelW * cats.length) / innerW));
   const clip = (c: string) => (c.length > 14 ? `${c.slice(0, 13)}…` : c);
 
-  const tipFor = (i: number, px: number, py: number): TooltipState => ({
-    x: px,
-    y: py,
-    title: cats[i],
-    rows: series
+  const tipFor = (i: number, px: number, py: number): TooltipState => {
+    const rows = series
       .map((s, si) => ({ color: seriesColor(si), label: s.name, value: valueAt(s, cats[i]) }))
       .filter((r): r is { color: string; label: string; value: number } => r.value !== null)
-      .map((r) => ({ ...r, value: formatValue(r.value, unit) })),
-  });
+      .map((r) => ({ ...r, value: formatValue(r.value, unit) }));
+    // One series: the title already names it, so the readout is just "<x> · <value>".
+    if (series.length === 1) return { x: px, y: py, title: [cats[i], rows[0]?.value].filter(Boolean).join(" · "), rows: [] };
+    return { x: px, y: py, title: cats[i], rows };
+  };
 
   const nearestIndex = (clientX: number) => {
     const rect = svgRef.current?.getBoundingClientRect();
@@ -101,7 +102,7 @@ export function CartesianPlot({
         ))}
         {xTicks?.map((t) => (
           <text key={t} x={xLin!(t)} y={HEIGHT - 8} textAnchor="middle" className="fill-muted-foreground text-[11px] tabular-nums">
-            {formatValue(t, null, true)}
+            {formatTick(t, null, isCompactAxis(xTicks))}
           </text>
         ))}
         {!xTicks &&
@@ -207,7 +208,10 @@ export function CartesianPlot({
                     onMouseEnter={() =>
                       setHover({
                         index: i,
-                        tip: { x: cx, y: cy, title: String(p.x), rows: [{ color: seriesColor(si), label: s.name, value: formatValue(p.y, unit) }] },
+                        tip:
+                          series.length === 1
+                            ? { x: cx, y: cy, title: `${p.x} · ${formatValue(p.y, unit)}`, rows: [] }
+                            : { x: cx, y: cy, title: String(p.x), rows: [{ color: seriesColor(si), label: s.name, value: formatValue(p.y, unit) }] },
                       })
                     }
                   />

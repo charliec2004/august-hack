@@ -11,7 +11,8 @@ import { trace } from "@/server/db/traces";
 import { gatewayProviderOptions, modelFor } from "@/server/agent/model";
 import { BRAIN_DELIVERY_PROMPT } from "@/server/agent/prompts/brain";
 import type { WorkerReport } from "@/server/types/domain";
-import { describeUi, safeUrl, type AskUser, type ShowChart, type ShowOptions } from "@/lib/genui";
+import { describeUi, MINI_APP_MAX_HTML, type AskUser, type ShowChart } from "@/lib/genui";
+import { vetGeneratedHtml } from "@/server/genui/vetHtml";
 
 export type DeliveryKind = "completed" | "needs_approval" | "needs_input" | "failed" | "waiting";
 
@@ -72,7 +73,7 @@ export async function deliverUpdate(input: {
       providerOptions: gatewayProviderOptions,
     });
     text = out.output.text.trim();
-    ui = sanitizeUi(out.output.ui, seen);
+    ui = await sanitizeUi(userId, out.output.ui, seen);
   } catch {
     try {
       const out = await generateText({
@@ -95,7 +96,7 @@ export async function deliverUpdate(input: {
     userId,
     role: "assistant",
     // The model's history sees what the cards showed (so "I choose: X" resolves).
-    content: ui ? `${text}\n\n${describeUi({ [ui.kind]: ui.data })}` : text,
+    content: ui ? `${text}\n\n${describeUi(ui.kind === "html" ? { html: { ...ui.data, height: null } } : { [ui.kind]: ui.data })}` : text,
     // Interactive cards get a stable id so only a submission of this card resolves it.
     parts: [{ type: "text", text }, ...(ui ? [{ type: `data-${ui.kind}`, data: { id: `card_${nanoid(12)}`, ...ui.data } }] : [])],
     responsibilityId,
@@ -131,21 +132,10 @@ const deliverySchema = z.object({
   text: z.string(),
   ui: z
     .object({
-      options: z
+      html: z
         .object({
           title: z.string(),
-          options: z
-            .array(
-              z.object({
-                name: z.string(),
-                subtitle: z.string().nullable(),
-                url: z.string().nullable(),
-                imageUrl: z.string().nullable(),
-                badge: z.string().nullable(),
-                facts: z.array(z.object({ label: z.string(), value: z.string() })),
-              }),
-            )
-            .max(8),
+          html: z.string(),
         })
         .nullable(),
       question: z
@@ -193,35 +183,22 @@ const deliverySchema = z.object({
 });
 
 type DeliveryUi =
-  | { kind: "options"; data: ShowOptions }
+  | { kind: "html"; data: { title: string; html: string; images: string[] } }
   | { kind: "question"; data: AskUser }
   | { kind: "chart"; data: ShowChart };
 
 type RawUi = NonNullable<z.infer<typeof deliverySchema>["ui"]>;
 
-/** Keep only links/images that appeared in evidence; drop anything malformed. */
-function sanitizeUi(ui: z.infer<typeof deliverySchema>["ui"], seen: string): DeliveryUi | null {
+/** Vet generated HTML against evidence; drop anything malformed. */
+async function sanitizeUi(
+  userId: string,
+  ui: z.infer<typeof deliverySchema>["ui"],
+  seen: string,
+): Promise<DeliveryUi | null> {
   if (!ui) return null;
-  const known = (u: string | null) => {
-    const url = safeUrl(u);
-    return url && u && seen.includes(u) ? url : undefined;
-  };
-  if (ui.options && ui.options.options.length >= 2) {
-    return {
-      kind: "options",
-      data: {
-        title: ui.options.title,
-        options: ui.options.options.map((o, i) => ({
-          id: String(i + 1),
-          name: o.name,
-          subtitle: o.subtitle ?? undefined,
-          url: known(o.url),
-          imageUrl: known(o.imageUrl),
-          badge: o.badge ?? undefined,
-          facts: o.facts.slice(0, 4),
-        })),
-      },
-    };
+  if (ui.html && ui.html.html.trim() && ui.html.html.length <= MINI_APP_MAX_HTML) {
+    const vetted = await vetGeneratedHtml(userId, ui.html.html, seen);
+    return { kind: "html", data: { title: ui.html.title, ...vetted } };
   }
   const question = sanitizeQuestion(ui.question);
   if (question) return { kind: "question", data: question };

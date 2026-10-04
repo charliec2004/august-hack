@@ -6,7 +6,7 @@ import type { ShowChart } from "@/lib/genui";
 import { CartesianPlot } from "./CartesianPlot";
 import { categories, cleanSeries, slices, valueAt, type Series } from "./data";
 import { PiePlot } from "./PiePlot";
-import { formatValue, seriesColor } from "./scale";
+import { formatTick, seriesColor } from "./scale";
 
 const KIND_LABEL = { bar: "Bar chart", line: "Line chart", pie: "Pie chart", scatter: "Scatter plot" } as const;
 
@@ -80,7 +80,7 @@ function DataTable({ title, kind, series, unit }: { title: string; kind: ShowCha
                 <th scope="row" className={cell}>
                   {r.label}
                 </th>
-                <td className={cell}>{formatValue(r.value, unit)}</td>
+                <td className={cell}>{formatTick(r.value, unit, false)}</td>
                 <td className={`${cell} text-muted-foreground`}>{Math.round((r.value / total) * 100)}%</td>
               </tr>
             ))}
@@ -115,7 +115,7 @@ function DataTable({ title, kind, series, unit }: { title: string; kind: ShowCha
                 const v = valueAt(s, c);
                 return (
                   <td key={s.name} className={cell}>
-                    {v === null ? "" : formatValue(v, unit)}
+                    {v === null ? "" : formatTick(v, unit, false)}
                   </td>
                 );
               })}

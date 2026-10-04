@@ -13,7 +13,7 @@ import { ensurePrimaryThread, insertMessage, recentMessages } from "@/server/db/
 import { captureMemories } from "@/server/memory/memories";
 import { updateThreadSummary, VERBATIM_TAIL } from "@/server/memory/summary";
 import { trace } from "@/server/db/traces";
-import { describeUi, isGenUiTool, stripHistoryLines, UI_RECORD_KEY } from "@/lib/genui";
+import { describeUi, isGenUiTool, stripHistoryLines, UI_RECORD_KEY, type ShowApp, type ShownHtml } from "@/lib/genui";
 
 export const maxDuration = 300;
 
@@ -56,8 +56,20 @@ async function turnRecord(stream: BrainStream): Promise<{ content: string; parts
       if (!isGenUiTool(toolName)) continue;
       const input = { ...(args as Record<string, unknown>) };
       delete input.__mastraMetadata;
-      parts.push({ type: `tool-${toolName}`, toolCallId, state: "output-available", input, output: { shown: true } });
-      shown.push(describeUi({ [UI_RECORD_KEY[toolName]]: input }));
+      let output: unknown = { shown: true };
+      if (toolName === "show_html") {
+        // Only the server-vetted document is kept; the model's raw html never is.
+        const vetted = step.toolResults.find((r) => r.payload.toolCallId === toolCallId)?.payload.result as
+          | ShownHtml
+          | undefined;
+        if (!vetted?.html) continue;
+        delete input.html;
+        output = vetted;
+        shown.push(describeUi({ html: { ...(input as ShowApp), html: vetted.html } }));
+      } else {
+        shown.push(describeUi({ [UI_RECORD_KEY[toolName]]: input }));
+      }
+      parts.push({ type: `tool-${toolName}`, toolCallId, state: "output-available", input, output });
     }
   }
   const text = parts

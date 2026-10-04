@@ -102,13 +102,16 @@ export const chartSchema = z.object({
   kind: z
     .enum(["bar", "line", "pie", "scatter"])
     .describe("bar: compare categories. line: change over time. pie: parts of one whole (few slices). scatter: two numeric measures"),
-  unit: z.string().nullable().describe("Unit of y values, e.g. '$', '°F', 'min'; null if none"),
+  unit: z
+    .string()
+    .nullable()
+    .describe("Simple unit of the raw y values, e.g. 'steps', '°F', '$', 'USD', 'min'; null if none. Never a scaled unit like 'thousand steps'"),
   series: z
     .array(
       z.object({
         name: z.string(),
         points: z
-          .array(z.object({ x: z.union([z.string(), z.number()]), y: z.number() }))
+          .array(z.object({ x: z.union([z.string(), z.number()]), y: z.number().describe("Raw value, unscaled (15000, not 15)") }))
           .min(1)
           .max(60),
       }),
@@ -119,19 +122,25 @@ export const chartSchema = z.object({
   note: z.string().nullable().describe("Source or caveat, e.g. 'Approximate, from general knowledge'"),
 });
 
-/** Mini app html cap. Big enough for a real calculator, small enough to stay a widget. */
+/** Generated HTML cap. Big enough for a real widget, small enough to stay one. */
 export const MINI_APP_MAX_HTML = 60_000;
 
-export const showAppSchema = z.object({
-  title: z.string().describe("Short name, e.g. 'Tip calculator'"),
+export const showHtmlSchema = z.object({
+  title: z.string().describe("Short name, e.g. 'Dinner near Hayes Valley' or 'Tip calculator'"),
   html: z
     .string()
     .max(MINI_APP_MAX_HTML)
     .describe(
-      "A complete, self-contained HTML document with inline <style> and <script>. No external URLs, fonts, images, or network requests.",
+      "A complete, self-contained HTML document with inline <style> and <script>. No external scripts, fonts, or network requests; remote images only with exact URLs you saw in evidence.",
     ),
   height: z.number().int().nullable().describe("Initial height hint in px, or null; the frame sizes itself to the content"),
 });
+
+/** The earlier name for generated HTML; persisted parts still render. */
+export const showAppSchema = showHtmlSchema;
+
+/** What the server returns for show_html: the vetted document and the image URLs it may load. */
+export type ShownHtml = { shown: true; html: string; images: string[] };
 
 export type OptionCard = z.infer<typeof optionSchema>;
 export type ShowOptions = z.infer<typeof showOptionsSchema>;
@@ -141,7 +150,7 @@ export type ShowPoll = z.infer<typeof showPollSchema>;
 export type ShowImage = z.infer<typeof showImageSchema>;
 export type ShowComparison = z.infer<typeof showComparisonSchema>;
 export type ShowChart = z.infer<typeof chartSchema>;
-export type ShowApp = z.infer<typeof showAppSchema>;
+export type ShowApp = z.infer<typeof showHtmlSchema>;
 
 /**
  * A card submission, sent as a `data-answer` part on the user's message next to
@@ -172,6 +181,7 @@ export const GENUI_TOOLS = [
   "show_poll",
   "show_chart",
   "show_app",
+  "show_html",
 ] as const;
 export type GenUiToolName = (typeof GENUI_TOOLS)[number];
 
@@ -256,6 +266,7 @@ type UiRecord = {
   poll?: ShowPoll;
   chart?: ShowChart;
   app?: ShowApp;
+  html?: ShowApp;
 };
 
 /** Which `describeUi` key each tool's input goes under. */
@@ -267,6 +278,7 @@ export const UI_RECORD_KEY: Record<GenUiToolName, keyof UiRecord> = {
   show_poll: "poll",
   show_chart: "chart",
   show_app: "app",
+  show_html: "html",
 };
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
@@ -296,12 +308,26 @@ export function describeUi(ui: UiRecord): string {
     return `(Chart shown: ${ui.chart.title}${unit}. ${clip(data, 600)})`;
   }
   if (ui.app) return `(Mini app shown: ${ui.app.title})`;
+  if (ui.html) {
+    const text = htmlText(ui.html.html ?? "");
+    return `(HTML shown: ${ui.html.title}${text ? `. ${clip(text, 400)}` : ""})`;
+  }
   return "";
+}
+
+/** Visible text of generated HTML, for the model's history. */
+function htmlText(html: string): string {
+  return html
+    .replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /** Matches the history-only lines `describeUi` writes. They never render. */
 const HISTORY_LINE =
-  /^\((?:Options shown|Asked|Comparison shown|Image shown|Poll shown|Chart shown|Mini app shown)\b.*\)\s*$/gm;
+  /^\((?:Options shown|Asked|Comparison shown|Image shown|Poll shown|Chart shown|Mini app shown|HTML shown)\b.*\)\s*$/gm;
 
 /** Remove history-only component descriptions from user-visible text. */
 export function stripHistoryLines(text: string): string {

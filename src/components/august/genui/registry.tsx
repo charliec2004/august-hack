@@ -9,6 +9,7 @@ import type {
   ShowComparison,
   ShowImage,
   ShowOptions,
+  ShownHtml,
   ShowPoll,
 } from "@/lib/genui";
 import type { TimelineActivityData, TimelineApprovalData } from "@/server/types/api";
@@ -17,13 +18,18 @@ import { ApprovalPart } from "../ApprovalCard";
 import { Chart } from "./chart/Chart";
 import { useDataCardId } from "./hooks";
 import { ComparisonTable } from "./ComparisonTable";
+import { GenUiSkeleton } from "./GenUiSkeleton";
 import { ImageCard } from "./ImageCard";
 import { MiniApp } from "./MiniApp";
 import { OptionsCarousel } from "./OptionsCarousel";
 import { Poll } from "./Poll";
 import { QuestionForm } from "./QuestionForm";
 
-/* Brain tool calls rendered as components, from their (possibly streaming) args. */
+/*
+ * Brain tool calls rendered as components, from their (possibly streaming) args.
+ * show_options, show_comparison, and show_image are no longer Brain tools; their
+ * renderers stay so older messages still render.
+ */
 
 type FormArgs = Partial<AskUser> & LegacyAskUser;
 const streaming = (status: { type: string }) => status.type === "running";
@@ -37,27 +43,46 @@ const ShowOptionsUI = makeAssistantToolUI<Partial<ShowOptions>, unknown>({
 const AskUserUI = makeAssistantToolUI<FormArgs, unknown>({
   toolName: "ask_user",
   display: "standalone",
-  render: ({ args, status, toolCallId }) => (
-    <QuestionForm cardId={toolCallId} data={args ?? {}} complete={!streaming(status)} />
-  ),
+  render: ({ args, status, toolCallId }) =>
+    streaming(status) ? <GenUiSkeleton kind="form" /> : <QuestionForm cardId={toolCallId} data={args ?? {}} />,
 });
 
 const ShowPollUI = makeAssistantToolUI<Partial<ShowPoll>, unknown>({
   toolName: "show_poll",
   display: "standalone",
-  render: ({ args, status, toolCallId }) => <Poll cardId={toolCallId} data={args ?? {}} complete={!streaming(status)} />,
+  render: ({ args, status, toolCallId }) =>
+    streaming(status) ? <GenUiSkeleton kind="poll" /> : <Poll cardId={toolCallId} data={args ?? {}} />,
 });
 
 const ShowChartUI = makeAssistantToolUI<Partial<ShowChart>, unknown>({
   toolName: "show_chart",
   display: "standalone",
-  render: ({ args }) => <Chart data={args ?? {}} />,
+  render: ({ args, status }) => (streaming(status) ? <GenUiSkeleton kind="chart" /> : <Chart data={args ?? {}} />),
 });
 
+/** Generated HTML renders only the server-vetted document from the tool result. */
+const ShowHtmlUI = makeAssistantToolUI<Partial<ShowApp>, Partial<ShownHtml>>({
+  toolName: "show_html",
+  display: "standalone",
+  render: ({ args, result, status }) =>
+    status.type === "incomplete" ? null : (
+      <MiniApp
+        title={args?.title}
+        html={result?.html}
+        images={result?.images ?? []}
+        height={args?.height}
+        complete={Boolean(result?.html)}
+      />
+    ),
+});
+
+/** Older generated apps (show_app), from before image vetting: no remote images. */
 const ShowAppUI = makeAssistantToolUI<Partial<ShowApp>, unknown>({
   toolName: "show_app",
   display: "standalone",
-  render: ({ args, status }) => <MiniApp data={args ?? {}} complete={!streaming(status)} />,
+  render: ({ args, status }) => (
+    <MiniApp title={args?.title} html={args?.html} height={args?.height} complete={!streaming(status)} />
+  ),
 });
 
 const ShowImageUI = makeAssistantToolUI<Partial<ShowImage>, unknown>({
@@ -105,6 +130,11 @@ const QuestionDataUI = makeAssistantDataUI<FormArgs & WithId>({
   render: ({ data }) => <DeliveredQuestion data={data ?? {}} />,
 });
 
+const HtmlDataUI = makeAssistantDataUI<{ title: string; html: string; images?: string[] }>({
+  name: "html",
+  render: ({ data }) => <MiniApp title={data?.title} html={data?.html} images={data?.images ?? []} />,
+});
+
 const ChartDataUI = makeAssistantDataUI<ShowChart>({
   name: "chart",
   render: ({ data }) => <Chart data={data ?? {}} />,
@@ -118,6 +148,7 @@ export function AugustRenderers() {
       <AskUserUI />
       <ShowPollUI />
       <ShowChartUI />
+      <ShowHtmlUI />
       <ShowAppUI />
       <ShowImageUI />
       <ShowComparisonUI />
@@ -126,6 +157,7 @@ export function AugustRenderers() {
       <OptionsDataUI />
       <QuestionDataUI />
       <ChartDataUI />
+      <HtmlDataUI />
     </>
   );
 }

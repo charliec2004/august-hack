@@ -1,18 +1,23 @@
 /**
- * The document a mini app runs in. The iframe is sandboxed without
+ * The document generated HTML runs in. The iframe is sandboxed without
  * allow-same-origin, and this CSP is the first thing in the document, so the
- * app can run its own inline script but can't fetch, load remote resources, or
- * submit forms anywhere.
+ * app can run its own inline script but can't fetch, submit forms, or load
+ * anything remote except the exact image URLs the server vetted.
  */
-export const MINI_APP_CSP = [
-  "default-src 'none'",
-  "script-src 'unsafe-inline'",
-  "style-src 'unsafe-inline'",
-  "img-src data: blob:",
-  "font-src data:",
-  "connect-src 'none'",
-  "form-action 'none'",
-].join("; ");
+export function miniAppCsp(images: readonly string[] = []): string {
+  return [
+    "default-src 'none'",
+    "script-src 'unsafe-inline'",
+    "style-src 'unsafe-inline'",
+    ["img-src data: blob:", ...images].join(" "),
+    "font-src data:",
+    "connect-src 'none'",
+    "form-action 'none'",
+  ].join("; ");
+}
+
+/** The policy with no remote images (older parts that were never vetted). */
+export const MINI_APP_CSP = miniAppCsp();
 
 export type MiniAppTheme = "light" | "dark";
 
@@ -66,11 +71,11 @@ document.addEventListener("DOMContentLoaded",function(){post();if(window.ResizeO
 })();`;
 
 /** Wrap the model's HTML so the CSP, base styles, and bridge come first. */
-export function buildMiniAppDoc(html: string, theme: MiniAppTheme): string {
+export function buildMiniAppDoc(html: string, theme: MiniAppTheme, images: readonly string[] = []): string {
   const body = html.replace(/^\s*<!doctype[^>]*>/i, "");
   return [
     "<!doctype html>",
-    `<meta http-equiv="Content-Security-Policy" content="${MINI_APP_CSP}">`,
+    `<meta http-equiv="Content-Security-Policy" content="${miniAppCsp(images.filter(isCspSource))}">`,
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<style>${baseStyles(theme)}</style>`,
@@ -92,4 +97,9 @@ export function parseMiniAppMessage(data: unknown): MiniAppMessage | null {
     return { type: "august:reply", text: m.text.trim().slice(0, 1000) };
   }
   return null;
+}
+
+/** Defense in depth: only clean https origin+path sources reach the policy. */
+function isCspSource(s: string): boolean {
+  return /^https:\/\/[^\s;,'"]+$/.test(s);
 }

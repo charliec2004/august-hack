@@ -157,6 +157,6 @@ export function brainTools(ctx: BrainContext) {
     responsibility_cancel,
     memory_forget,
     memory_search,
-    ...uiTools(),
+    ...uiTools(ctx),
   };
 }

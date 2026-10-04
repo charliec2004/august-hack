@@ -30,16 +30,50 @@ export function linear(domain: [number, number], range: [number, number]) {
 }
 
 const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
-const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+const oneDecimal = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
 
 const PREFIX_UNITS = new Set(["$", "€", "£", "¥", "₹"]);
 
-/** 1234.5 with unit "$" -> "$1,234.5"; "°F" -> "1,234.5°F"; "min" -> "1,234.5 min". */
-export function formatValue(v: number, unit: string | null, short = false): string {
-  const n = short && Math.abs(v) >= 10_000 ? compact.format(v) : number.format(v);
-  if (!unit) return n;
-  if (PREFIX_UNITS.has(unit)) return v < 0 ? `-${unit}${n.slice(1)}` : `${unit}${n}`;
-  if (unit === "%" || unit.startsWith("°")) return `${n}${unit}`;
+/** Units short enough to sit on every tick: currency symbols, %, and degree units. */
+function symbolUnit(unit: string | null): "prefix" | "suffix" | null {
+  if (!unit) return null;
+  if (PREFIX_UNITS.has(unit)) return "prefix";
+  if (unit === "%" || /^°[A-Z]?$/.test(unit)) return "suffix";
+  return null;
+}
+
+function withSymbol(n: string, v: number, unit: string | null): string {
+  const kind = symbolUnit(unit);
+  if (kind === "prefix") return v < 0 ? `-${unit}${n.replace(/^-/, "")}` : `${unit}${n}`;
+  if (kind === "suffix") return `${n}${unit}`;
+  return n;
+}
+
+/** 15000 -> "15k", 2500000 -> "2.5M". */
+function compact(v: number): string {
+  const a = Math.abs(v);
+  if (a >= 1e9) return `${oneDecimal.format(v / 1e9)}B`;
+  if (a >= 1e6) return `${oneDecimal.format(v / 1e6)}M`;
+  if (a >= 1e3) return `${oneDecimal.format(v / 1e3)}k`;
+  return oneDecimal.format(v);
+}
+
+/** Whether an axis spanning these values should use compact labels (decided once per axis). */
+export const isCompactAxis = (values: number[]) => Math.max(0, ...values.map(Math.abs)) >= 10_000;
+
+/**
+ * An axis tick: a plain number, compact when the axis is large. Only a
+ * single-symbol unit ($, %, °F) rides along; any other unit is named once in
+ * the title, never on every tick.
+ */
+export function formatTick(v: number, unit: string | null, compactAxis: boolean): string {
+  return withSymbol(compactAxis ? compact(v) : number.format(v), v, unit);
+}
+
+/** A value in full, with its unit once: "$1,234.5", "62°F", "15,000 steps". */
+export function formatValue(v: number, unit: string | null): string {
+  const n = number.format(v);
+  if (!unit || symbolUnit(unit)) return withSymbol(n, v, unit);
   return `${n} ${unit}`;
 }
 
