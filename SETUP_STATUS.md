@@ -16,9 +16,10 @@ provider credential stores. Never paste token values here.
 - migrations: 001_initial, 002_memory (pgvector), 003_computers_and_mail — APPLIED
 - auth (Managed Better Auth): READY (provisioned; app uses demo identity for P0)
 - object storage: READY — bucket `august-artifacts` (private)
-- ai gateway: BLOCKED — requires paid plan / credits (DECISIONS D2). Re-enable `aiGateway: true`
-  in `neon.ts`, `neon config apply -y`, `neon env pull`.
-- functions / scheduled wake trigger: DEFERRED (in-process scanner locally; `/api/internal/wake-scan`)
+- ai gateway: credential + base URL PRESENT locally and in Vercel; requests 403 until the org is on a
+  paid plan (DECISIONS D2). After upgrading: `NEON_PLAN_PAID=true neon deploy --env .env.local`.
+- functions: `wakescan` (calls `/api/internal/wake-scan` with CRON_SECRET); trigger `wake-scan` every minute — READY
+- test branch: `test` (`br-floral-smoke-b5bfx9ol`) for integration tests
 
 ## Executor
 - status: READY
@@ -40,7 +41,7 @@ provider credential stores. Never paste token values here.
 ## AgentMail
 - organization id: `7694e0b9-f8b0-4c58-a184-967991586835`
 - inbox: `august-hack@agentmail.to` (verified; can send to anyone)
-- webhook: PENDING (needs public URL)
+- webhook: `ep_3KF63Tzv4rRIkv3vLJCWVDAxcXV` → https://august-hack.vercel.app/api/webhooks/agentmail (message.received); secret in env
 - API key: PRESENT
 
 ## Fly Sprites (core, DECISIONS D1)
@@ -50,4 +51,5 @@ provider credential stores. Never paste token values here.
 
 ## Vercel
 - CLI: logged in as `charliec2004`
-- project / deployed URL: PENDING
+- project: `august-hack` (`prj_JLES2Y7mR37UAGhdSULrOrap7uR1`), framework nextjs, SSO protection off
+- deployed URL: https://august-hack.vercel.app (AUGUST_ENV=demo → demo controls visible)
