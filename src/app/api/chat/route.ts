@@ -13,7 +13,7 @@ import { ensurePrimaryThread, insertMessage, recentMessages } from "@/server/db/
 import { captureMemories } from "@/server/memory/memories";
 import { updateThreadSummary, VERBATIM_TAIL } from "@/server/memory/summary";
 import { trace } from "@/server/db/traces";
-import { describeUi, isGenUiTool, stripHistoryLines } from "@/lib/genui";
+import { describeUi, isGenUiTool, stripHistoryLines, UI_RECORD_KEY } from "@/lib/genui";
 
 export const maxDuration = 300;
 
@@ -57,8 +57,7 @@ async function turnRecord(stream: BrainStream): Promise<{ content: string; parts
       const input = { ...(args as Record<string, unknown>) };
       delete input.__mastraMetadata;
       parts.push({ type: `tool-${toolName}`, toolCallId, state: "output-available", input, output: { shown: true } });
-      const key = { show_options: "options", ask_user: "question", show_comparison: "comparison", show_image: "image" }[toolName];
-      shown.push(describeUi({ [key]: input }));
+      shown.push(describeUi({ [UI_RECORD_KEY[toolName]]: input }));
     }
   }
   const text = parts

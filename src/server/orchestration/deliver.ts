@@ -10,7 +10,7 @@ import { trace } from "@/server/db/traces";
 import { gatewayProviderOptions, modelFor } from "@/server/agent/model";
 import { BRAIN_DELIVERY_PROMPT } from "@/server/agent/prompts/brain";
 import type { WorkerReport } from "@/server/types/domain";
-import { describeUi, safeUrl, type AskUser, type ShowOptions } from "@/lib/genui";
+import { describeUi, safeUrl, type AskUser, type ShowChart, type ShowOptions } from "@/lib/genui";
 
 export type DeliveryKind = "completed" | "needs_approval" | "needs_input" | "failed" | "waiting";
 
@@ -94,12 +94,8 @@ export async function deliverUpdate(input: {
     userId,
     role: "assistant",
     // The model's history sees what the cards showed (so "I choose: X" resolves).
-    content: ui ? `${text}\n\n${describeUi(ui.kind === "options" ? { options: ui.data } : { question: ui.data })}` : text,
-    parts: [
-      { type: "text", text },
-      ...(ui?.kind === "options" ? [{ type: "data-options", data: ui.data }] : []),
-      ...(ui?.kind === "question" ? [{ type: "data-question", data: ui.data }] : []),
-    ],
+    content: ui ? `${text}\n\n${describeUi({ [ui.kind]: ui.data })}` : text,
+    parts: [{ type: "text", text }, ...(ui ? [{ type: `data-${ui.kind}`, data: ui.data }] : [])],
     responsibilityId,
   });
   await trace({
@@ -152,23 +148,63 @@ const deliverySchema = z.object({
         .nullable(),
       question: z
         .object({
-          question: z.string(),
-          choices: z.array(z.object({ label: z.string(), detail: z.string().nullable() })).max(6),
+          title: z.string().nullable(),
+          questions: z
+            .array(
+              z.object({
+                prompt: z.string(),
+                kind: z.enum(["single", "multi", "text", "scale"]),
+                choices: z.array(z.object({ label: z.string(), detail: z.string().nullable() })).max(8),
+                allowOther: z.boolean(),
+                placeholder: z.string().nullable(),
+                scale: z
+                  .object({
+                    min: z.number(),
+                    max: z.number(),
+                    minLabel: z.string().nullable(),
+                    maxLabel: z.string().nullable(),
+                  })
+                  .nullable(),
+              }),
+            )
+            .max(6),
+        })
+        .nullable(),
+      chart: z
+        .object({
+          title: z.string(),
+          kind: z.enum(["bar", "line", "pie", "scatter"]),
+          unit: z.string().nullable(),
+          series: z
+            .array(
+              z.object({
+                name: z.string(),
+                points: z.array(z.object({ x: z.string(), y: z.number() })).max(60),
+              }),
+            )
+            .max(8),
+          note: z.string().nullable(),
         })
         .nullable(),
     })
     .nullable(),
 });
 
-type DeliveryUi = { kind: "options"; data: ShowOptions } | { kind: "question"; data: AskUser };
+type DeliveryUi =
+  | { kind: "options"; data: ShowOptions }
+  | { kind: "question"; data: AskUser }
+  | { kind: "chart"; data: ShowChart };
+
+type RawUi = NonNullable<z.infer<typeof deliverySchema>["ui"]>;
 
 /** Keep only links/images that appeared in evidence; drop anything malformed. */
 function sanitizeUi(ui: z.infer<typeof deliverySchema>["ui"], seen: string): DeliveryUi | null {
+  if (!ui) return null;
   const known = (u: string | null) => {
     const url = safeUrl(u);
     return url && u && seen.includes(u) ? url : undefined;
   };
-  if (ui?.options && ui.options.options.length >= 2) {
+  if (ui.options && ui.options.options.length >= 2) {
     return {
       kind: "options",
       data: {
@@ -185,18 +221,49 @@ function sanitizeUi(ui: z.infer<typeof deliverySchema>["ui"], seen: string): Del
       },
     };
   }
-  if (ui?.question && ui.question.choices.length >= 2) {
-    return {
-      kind: "question",
-      data: {
-        question: ui.question.question,
-        choices: ui.question.choices.map((c, i) => ({
-          id: String(i + 1),
-          label: c.label,
-          detail: c.detail ?? undefined,
-        })),
-      },
-    };
-  }
+  const question = sanitizeQuestion(ui.question);
+  if (question) return { kind: "question", data: question };
+  const chart = sanitizeChart(ui.chart);
+  if (chart) return { kind: "chart", data: chart };
   return null;
+}
+
+/** A form keeps only questions it can render: choice questions need two choices, scales a range. */
+function sanitizeQuestion(q: RawUi["question"]): AskUser | null {
+  if (!q) return null;
+  const questions = q.questions
+    .filter((x) => x.prompt.trim())
+    .map((x, i) => {
+      const choice = x.kind === "single" || x.kind === "multi";
+      const scale =
+        x.kind === "scale" && x.scale && Number.isFinite(x.scale.min) && Number.isFinite(x.scale.max)
+          ? {
+              min: Math.round(Math.min(x.scale.min, x.scale.max)),
+              max: Math.round(Math.max(x.scale.min, x.scale.max)),
+              minLabel: x.scale.minLabel,
+              maxLabel: x.scale.maxLabel,
+            }
+          : null;
+      return {
+        id: `q${i + 1}`,
+        prompt: x.prompt,
+        kind: x.kind,
+        choices: choice ? x.choices.map((c, j) => ({ id: String(j + 1), label: c.label, detail: c.detail })) : [],
+        allowOther: choice && x.allowOther,
+        placeholder: x.placeholder,
+        scale,
+      };
+    })
+    .filter((x) => (x.kind === "single" || x.kind === "multi" ? x.choices.length >= 2 : x.kind !== "scale" || x.scale));
+  return questions.length > 0 ? { title: q.title, questions, submitLabel: null } : null;
+}
+
+/** Numeric points only; a chart with nothing plottable is dropped. */
+function sanitizeChart(c: RawUi["chart"]): ShowChart | null {
+  if (!c) return null;
+  const series = c.series
+    .map((s) => ({ name: s.name, points: s.points.filter((p) => Number.isFinite(p.y)).slice(0, 60) }))
+    .filter((s) => s.name.trim() && s.points.length > 0);
+  if (series.length === 0) return null;
+  return { title: c.title, kind: c.kind, unit: c.unit, series, note: c.note };
 }

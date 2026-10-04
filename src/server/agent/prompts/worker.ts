@@ -46,7 +46,8 @@ export const WORKER_EVIDENCE_POLICY = `Evidence and reporting:
 - Report "blocked" only for information only the user can give (a preference, a detail), with a one-line question.
 - "failed" only when no safe path remains.
 - summary: a few factual sentences for August, including the best options found with key facts
-  (name, time, price, link). No chain-of-thought.`;
+  (name, time, price, link). Keep exact numbers as found (prices, times, counts, dates) so they can be shown
+  as cards or a chart. No chain-of-thought.`;
 
 export function workerSystemPrompt(): string {
   return [WORKER_IDENTITY, WORKER_SAFETY, WORKER_TOOL_POLICY, WORKER_EVIDENCE_POLICY].join("\n\n");
