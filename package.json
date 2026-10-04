@@ -19,6 +19,8 @@
     "@mastra/ai-sdk": "^1.10.6",
     "@mastra/core": "^1.74.0",
     "@mastra/mcp": "^2.1.2",
+    "@neon/config": "^1.8.3",
+    "@neon/env": "^1.5.0",
     "@onkernel/sdk": "^0.119.0",
     "agentmail": "^0.5.35",
     "ai": "^7.0.127",

@@ -20,3 +20,4 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 setup_keys.py
+set_secret.py
