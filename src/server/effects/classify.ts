@@ -26,6 +26,7 @@ export type EffectCategory =
   | "financial_transfer"
   | "destructive_delete"
   | "cancel_with_penalty"
+  | "environment_change"
   | "unknown";
 
 export type ActionClassification =
@@ -60,6 +61,7 @@ export const CATEGORY_CLASS: Record<EffectCategory, EffectClass> = {
   financial_transfer: "irreversible",
   destructive_delete: "irreversible",
   cancel_with_penalty: "irreversible",
+  environment_change: "consequential",
   unknown: "consequential",
 };
 
@@ -125,6 +127,12 @@ export const POLICY_TABLE: Readonly<Record<string, PolicyEntry>> = {
   "executor.gmail.send_message": effect("message_send"),
   "executor.gmail.reply": effect("message_send"),
   "executor.gmail.delete_message": effect("destructive_delete"),
+
+  // Computers (Fly Sprites). Task-local commands are not effects; anything that
+  // reaches the outside world from a Computer goes through computer_external,
+  // whose frozen command text is also keyword-scanned at prepare time.
+  "computer.user_environment_change": effect("environment_change"),
+  "computer.computer_external": effect("form_submit"),
 
   // Internal state changes owned by Postgres.
   "internal.create_responsibility": INTERNAL,

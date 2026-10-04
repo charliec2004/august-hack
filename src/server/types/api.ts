@@ -92,6 +92,12 @@ export type AugustState = {
   responsibilities: ResponsibilityView[];
   approvals: ApprovalView[];
   activity: ActivityItem[];
+  /**
+   * Id of the newest persisted conversation message. When it changes and the
+   * thread isn't streaming, the UI reloads GET /api/messages (updates August
+   * delivered asynchronously, e.g. after a scheduled check or webhook).
+   */
+  latestMessageId: string | null;
   /** Development/demo controls enabled (AUGUST_ENV !== "production"). */
   demoControls: boolean;
   serverTime: string;
