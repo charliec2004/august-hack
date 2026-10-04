@@ -42,8 +42,20 @@ function gateway() {
 
 export class ModelUnavailableError extends Error {}
 
+type ChatModel = ReturnType<ReturnType<typeof createOpenAI>["chat"]>;
+let override: ((purpose: AugustModelPurpose) => ChatModel) | null = null;
+
+/**
+ * Scripted-model hook for offline end-to-end tests only (scripts/e2e-scripted.ts).
+ * Not reachable from any route.
+ */
+export function setModelOverrideForTesting(fn: ((purpose: AugustModelPurpose) => ChatModel) | null) {
+  override = fn;
+}
+
 /** Chat model for a purpose, routed through Neon AI Gateway chat completions. */
-export function modelFor(purpose: Exclude<AugustModelPurpose, "embedding">) {
+export function modelFor(purpose: Exclude<AugustModelPurpose, "embedding">): ChatModel {
+  if (override) return override(purpose);
   return gateway().chat(modelIdFor(purpose));
 }
 
@@ -52,5 +64,6 @@ export function embeddingModel() {
 }
 
 export function modelConfigured(): boolean {
+  if (override) return true;
   return Boolean(process.env.NEON_AI_GATEWAY_BASE_URL && process.env.NEON_AI_GATEWAY_TOKEN);
 }
