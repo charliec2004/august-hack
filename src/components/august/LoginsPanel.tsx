@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { KeyRoundIcon, LoaderCircleIcon, LockIcon } from "lucide-react";
+import { KeyRoundIcon, LoaderCircleIcon, LockIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { SavedLogin } from "@/server/types/api";
 import { normalizeLoginOrigin } from "@/server/vault/origin";
 import { formatWhen } from "./format";
-import { PanelSection, SidePanel, SidePanelHeader } from "./SidePanel";
+import { SidePanel, SidePanelHeader } from "./SidePanel";
 import { useFetched } from "./useFetched";
 
 const STATUS: Record<SavedLogin["status"], string> = {
@@ -19,6 +19,27 @@ const inputClass =
   "border-input bg-background focus-visible:ring-ring/50 h-9 w-full rounded-lg border px-3 text-sm outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2";
 
 /** Saved website logins (the vault). Secrets go in once and never come back. */
+/** "Add login" button that opens the form in place. */
+function AddLogin({ onAdded }: { onAdded: () => void }) {
+  const [open, setOpen] = useState(false);
+  if (!open) {
+    return (
+      <Button variant="outline" className="self-start rounded-full" onClick={() => setOpen(true)}>
+        <PlusIcon />
+        Add login
+      </Button>
+    );
+  }
+  return (
+    <AddLoginForm
+      onAdded={() => {
+        setOpen(false);
+        onAdded();
+      }}
+    />
+  );
+}
+
 export function LoginsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { data, error, loading, reload } = useFetched<{ logins: SavedLogin[] }>("/api/vault", open);
   const logins = data?.logins ?? [];
@@ -31,15 +52,13 @@ export function LoginsPanel({ open, onClose }: { open: boolean; onClose: () => v
       />
       <div className="flex-1 overflow-y-auto px-6 pt-4 pb-8">
         <div className="flex flex-col gap-8">
-          <PanelSection title="Saved">
+          <div>
             {loading && !data ? (
               <ListSkeleton />
             ) : error ? (
               <p className="text-muted-foreground text-sm">{error}</p>
             ) : logins.length === 0 ? (
-              <p className="text-muted-foreground text-sm leading-relaxed">
-                No saved logins yet. Add one below and August can sign in there when a task needs it.
-              </p>
+              <p className="text-muted-foreground text-sm">No logins yet.</p>
             ) : (
               <ul className="flex flex-col divide-y">
                 {logins.map((l) => (
@@ -47,10 +66,8 @@ export function LoginsPanel({ open, onClose }: { open: boolean; onClose: () => v
                 ))}
               </ul>
             )}
-          </PanelSection>
-          <PanelSection title="Add a login">
-            <AddLoginForm onAdded={reload} />
-          </PanelSection>
+          </div>
+          <AddLogin onAdded={reload} />
         </div>
       </div>
     </SidePanel>

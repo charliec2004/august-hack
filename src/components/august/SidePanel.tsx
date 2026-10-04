@@ -37,11 +37,11 @@ export function SidePanelHeader({
   return (
     <header className="flex items-start gap-3 px-6 pt-6 pb-2">
       <div className="min-w-0 flex-1">
-        <DialogPrimitive.Title className="font-heading text-xl leading-tight font-medium tracking-tight">
+        <DialogPrimitive.Title className="text-lg leading-tight font-semibold">
           {title}
         </DialogPrimitive.Title>
         {subtitle && (
-          <DialogPrimitive.Description className="text-muted-foreground mt-1.5 text-sm leading-relaxed">
+          <DialogPrimitive.Description className="sr-only">
             {subtitle}
           </DialogPrimitive.Description>
         )}
