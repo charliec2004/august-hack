@@ -88,7 +88,7 @@ async function openRunBrowser(ctx: RunBrowserCtx): Promise<OpenedBrowser> {
       workerRunId: ctx.runId,
       kind: "tool.started",
       detail: {
-        text: "Opened my browser (you can watch or take control)",
+        text: "Opened a browser",
         provider: "kernel",
         browserSessionId: b.id,
       },
@@ -225,7 +225,7 @@ async function guarded<T>(ctx: RunBrowserCtx, what: string, host: string, fn: ()
       workerRunId: ctx.runId,
       kind: r.status === "succeeded" ? "tool.succeeded" : "tool.failed",
       detail: {
-        text: r.status === "succeeded" ? what : `Couldn't finish on ${host}`,
+        text: r.status === "succeeded" ? what : `Ran into trouble on ${host}`,
         provider: "kernel",
         browserSessionId: (r.data as { browserSessionId?: string } | undefined)?.browserSessionId ?? null,
       },
@@ -322,7 +322,7 @@ for (let i = 0; i < steps.length; i++) {
 }
 await page.waitForLoadState("networkidle", { timeout: 4000 }).catch(() => {});
 return { refused: null };`;
-  return guarded(ctx, "Worked on the page", "the page", async () => {
+  return guarded(ctx, "Filled in the page", "the page", async () => {
     const { value } = await exec<{ refused: string | null; index?: number; label?: string }>(ctx, code, 90);
     if (value.refused === "commit") {
       return blocked(
