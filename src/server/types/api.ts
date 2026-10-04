@@ -161,3 +161,39 @@ export type ApprovalDecisionRequest = {
   /** Must equal the proposalHash the user was shown. */
   proposalHash: string;
 };
+
+/* App surfaces beyond the conversation. ----------------------------------- */
+
+/** GET /api/vault row. Never carries a username or password. */
+export type SavedLogin = {
+  id: string;
+  label: string;
+  origins: string[];
+  status: "pending" | "ready" | "failed";
+  lastUsedAt: string | null;
+  createdAt: string;
+};
+
+/** GET /api/connections row: a connected app, in human terms. */
+export type ConnectionView = {
+  /** e.g. "Google Calendar" */
+  name: string;
+  /** Executor integration key, e.g. "google_calendar". */
+  integration: string;
+  /** e.g. "Connected" */
+  status: string;
+  /** "Personal" or "Shared". */
+  scope: string;
+};
+
+export type ConnectionsResponse = { connections: ConnectionView[]; message: string | null };
+
+/** GET /api/computer. */
+export type ComputerStatus = {
+  available: boolean;
+  reason: string | null;
+  tools: { toolKey: string; packageName: string; packageVersion: string }[];
+  generation: number;
+  /** Browser sessions live right now. */
+  liveSessions: number;
+};

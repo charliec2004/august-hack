@@ -1,6 +1,8 @@
 import { currentUser } from "@/server/auth/currentUser";
 import { addLogin, listLogins, VaultInputError } from "@/server/vault/vault";
 
+export const dynamic = "force-dynamic";
+
 /**
  * Saved website logins. POST takes a password ONCE and hands it straight to
  * Kernel's vault; no response, log, or row ever contains it.

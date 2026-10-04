@@ -477,7 +477,15 @@ const MessageError: FC = () => {
   );
 };
 
+/** Responsibility a persisted message belongs to (metadata.custom), for "Show in conversation". */
+const useMessageResponsibility = (): string | undefined =>
+  useAuiState((s) => {
+    const custom = (s.message.metadata as { custom?: { responsibilityId?: unknown } }).custom;
+    return typeof custom?.responsibilityId === "string" ? custom.responsibilityId : undefined;
+  });
+
 const AssistantMessage: FC = () => {
+  const responsibilityId = useMessageResponsibility();
   const {
     ToolFallback: ToolFallbackComponent = ToolFallback,
     ToolGroup,
@@ -498,6 +506,7 @@ const AssistantMessage: FC = () => {
     <MessagePrimitive.Root
       data-slot="aui_assistant-message-root"
       data-role="assistant"
+      data-responsibility-id={responsibilityId}
       className="fade-in slide-in-from-bottom-1 animate-in relative duration-150 [contain-intrinsic-size:auto_200px] [content-visibility:auto]"
     >
       <div
@@ -641,9 +650,11 @@ const UserImagePart: ImageMessagePartComponent = (part) => (
 );
 
 const UserMessage: FC = () => {
+  const responsibilityId = useMessageResponsibility();
   return (
     <MessagePrimitive.Root
       data-slot="aui_user-message-root"
+      data-responsibility-id={responsibilityId}
       className="fade-in slide-in-from-bottom-1 animate-in grid auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 duration-150 [contain-intrinsic-size:auto_200px] [content-visibility:auto] [&:where(>*)]:col-start-2"
       data-role="user"
     >

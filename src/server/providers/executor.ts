@@ -341,6 +341,30 @@ async function safeTrace(t: Parameters<typeof trace>[0]) {
 // Public surface
 // ---------------------------------------------------------------------------
 
+export type ExecutorConnection = { address: string; integration: string; owner: string; name: string };
+
+/**
+ * The user's connected apps, for the UI's Connections panel. Metadata only
+ * (no app data), so unlike executorRead it records no evidence or trace.
+ */
+export async function executorListConnections(): Promise<ExecutorConnection[]> {
+  const outcome = await runProgram("return await tools.executor.coreTools.connections.list({});");
+  if (outcome.kind === "paused") {
+    await declinePaused(outcome.executionId);
+    throw new Error("executor_approval_pause");
+  }
+  if (outcome.kind === "error") throw new Error(outcome.error);
+  const r = outcome.result as { ok?: boolean; data?: { connections?: unknown } } | null;
+  if (!r || r.ok === false || !Array.isArray(r.data?.connections)) throw new Error("unexpected connections shape");
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  return (r.data.connections as Record<string, unknown>[]).map((c) => ({
+    address: str(c.address),
+    integration: str(c.integration),
+    owner: str(c.owner),
+    name: str(c.name),
+  }));
+}
+
 /** Executor's own how-to docs (catalog when `name` omitted). Not user data; no evidence row. */
 export async function executorSkills(name?: string): Promise<string> {
   const raw = (await callTool("skills", name ? { name } : {})) as {

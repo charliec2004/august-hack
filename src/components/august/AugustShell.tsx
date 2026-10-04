@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import {
   useAuiState,
@@ -13,13 +20,18 @@ import {
 } from "@/components/assistant-ui/elements/thread.aui";
 import { Button } from "@/components/ui/button";
 import type { LiveBrowser } from "@/server/types/api";
+import { AppSurfaces } from "./AppSurfaces";
 import { BrowserLiveView, type LiveViewTarget } from "./BrowserLiveView";
+import { ComputerPanel } from "./ComputerPanel";
+import { ConnectionsPanel } from "./ConnectionsPanel";
 import { DemoControls } from "./DemoControls";
 import { isFinished } from "./format";
+import { LoginsPanel } from "./LoginsPanel";
 import { ResponsibilityDrawer } from "./ResponsibilityDrawer";
 import { AugustRenderers } from "./genui/registry";
 import { ResponsibilityRail } from "./ResponsibilityRail";
 import { ShellActionsContext, type ShellActions } from "./shellActions";
+import { isSurface, type Surface } from "./surfaces";
 import { useAugust, type Connection } from "./useAugustState";
 
 /**
@@ -30,7 +42,14 @@ import { useAugust, type Connection } from "./useAugustState";
  */
 export function AugustShell() {
   const { state, connection } = useAugust();
-  const [drawerId, setDrawerId] = useState<string | null>(null);
+  // `?panel=logins|connections|computer` and `?responsibility=<id>` open a
+  // panel on load (deep links, screenshots); after that, local state wins.
+  const urlPanel = useSyncExternalStore(noopSubscribe, readUrlPanel, () => null);
+  const urlDrawer = useSyncExternalStore(noopSubscribe, readUrlDrawer, () => null);
+  const [drawerState, setDrawerId] = useState<string | null | undefined>();
+  const [panelState, setPanel] = useState<Surface | null | undefined>();
+  const drawerId = drawerState === undefined ? urlDrawer : drawerState;
+  const panel = panelState === undefined ? urlPanel : panelState;
   const [liveTarget, setLiveTarget] = useState<LiveViewTarget | null>(null);
   const [railOpen, setRailOpen] = useState(false);
 
@@ -46,7 +65,22 @@ export function AugustShell() {
 
   const openDrawer = useCallback((id: string) => {
     setRailOpen(false);
+    setPanel(null);
     setDrawerId(id);
+  }, []);
+  const openPanel = useCallback((surface: Surface) => {
+    setRailOpen(false);
+    setDrawerId(null);
+    setPanel(surface);
+  }, []);
+  const showInConversation = useCallback((id: string) => {
+    setDrawerId(null);
+    // Let the drawer start closing before scrolling the thread underneath.
+    requestAnimationFrame(() => {
+      document
+        .querySelector(`[data-responsibility-id="${CSS.escape(id)}"]`)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   }, []);
   // Live views open only for sessions that are live in the latest state.
   const liveBrowsers = useMemo(() => state?.liveBrowsers ?? [], [state]);
@@ -101,9 +135,12 @@ export function AugustShell() {
       onOpen={openDrawer}
       onWatch={watchResponsibility}
       footer={
-        state?.demoControls ? (
-          <DemoControls responsibilities={responsibilities} />
-        ) : null
+        <>
+          <AppSurfaces active={panel} onOpen={openPanel} />
+          {state?.demoControls ? (
+            <DemoControls responsibilities={responsibilities} />
+          ) : null}
+        </>
       }
     />
   );
@@ -174,6 +211,17 @@ export function AugustShell() {
           responsibilityId={drawerId}
           onClose={() => setDrawerId(null)}
           onWatch={watchResponsibility}
+          onShowInConversation={showInConversation}
+        />
+        <LoginsPanel open={panel === "logins"} onClose={() => setPanel(null)} />
+        <ConnectionsPanel
+          open={panel === "connections"}
+          onClose={() => setPanel(null)}
+        />
+        <ComputerPanel
+          open={panel === "computer"}
+          onClose={() => setPanel(null)}
+          liveSessions={liveBrowsers.length}
         />
 
         <BrowserLiveView
@@ -188,6 +236,14 @@ export function AugustShell() {
 }
 
 /* ------------------------------------------------------------------------- */
+
+const noopSubscribe = () => () => {};
+const readUrlPanel = (): Surface | null => {
+  const v = new URLSearchParams(window.location.search).get("panel");
+  return isSurface(v) ? v : null;
+};
+const readUrlDrawer = () =>
+  new URLSearchParams(window.location.search).get("responsibility");
 
 /** No status dot; only a quiet word while the connection is being restored. */
 function ConnectionIndicator({ connection }: { connection: Connection }) {

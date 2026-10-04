@@ -1,12 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
+import { useAuiState } from "@assistant-ui/react";
 import {
   ChevronRightIcon,
   LoaderCircleIcon,
   MonitorPlayIcon,
-  XIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -16,27 +15,28 @@ import type {
 } from "@/server/types/api";
 import { WakeButton } from "./DemoControls";
 import { MarkdownBlock } from "./MarkdownBlock";
-import { MomentsTimeline } from "./MomentsTimeline";
+import { PanelSection, SidePanel, SidePanelHeader } from "./SidePanel";
 import { SourcesSection } from "./SourcesSection";
-import {
-  formatWhen,
-  isFinished,
-} from "./format";
+import { formatWhen, isFinished } from "./format";
 import { useAugust } from "./useAugustState";
 
+const FACT_LIMIT = 5;
+
 /**
- * Inspection surface for one responsibility. August keeps working whether or
- * not this is open; it exists so the user can see why something is waiting and
- * when it resumes.
+ * Inspection surface for one responsibility. Shows only what the conversation
+ * doesn't: where it stands in one line, the key facts, what happens next, and
+ * the sources August used.
  */
 export function ResponsibilityDrawer({
   responsibilityId,
   onClose,
   onWatch,
+  onShowInConversation,
 }: {
   responsibilityId: string | null;
   onClose: () => void;
   onWatch: (id: string) => void;
+  onShowInConversation: (id: string) => void;
 }) {
   const { state, loadDetail } = useAugust();
   const summary =
@@ -70,30 +70,23 @@ export function ResponsibilityDrawer({
   const loadFailed = failedId !== null && failedId === responsibilityId;
 
   return (
-    <DialogPrimitive.Root
-      open={responsibilityId !== null}
-      onOpenChange={(open) => !open && onClose()}
-    >
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Backdrop className="data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0 fixed inset-0 z-40 bg-black/15 duration-200" />
-        <DialogPrimitive.Popup className="bg-background data-open:animate-in data-open:slide-in-from-right data-closed:animate-out data-closed:slide-out-to-right fixed inset-y-0 right-0 z-40 flex w-full max-w-md flex-col border-l shadow-2xl duration-200 outline-none">
-          {view ? (
-            <DrawerBody
-              view={view}
-              detail={d}
-              loadFailed={loadFailed}
-              demoControls={state?.demoControls ?? false}
-              onWatch={() => onWatch(view.id)}
-              onClose={onClose}
-            />
-          ) : (
-            <div className="text-muted-foreground flex flex-1 items-center justify-center text-sm">
-              <LoaderCircleIcon className="size-4 animate-spin" />
-            </div>
-          )}
-        </DialogPrimitive.Popup>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+    <SidePanel open={responsibilityId !== null} onClose={onClose}>
+      {view ? (
+        <DrawerBody
+          view={view}
+          detail={d}
+          loadFailed={loadFailed}
+          demoControls={state?.demoControls ?? false}
+          onWatch={() => onWatch(view.id)}
+          onShowInConversation={() => onShowInConversation(view.id)}
+          onClose={onClose}
+        />
+      ) : (
+        <div className="text-muted-foreground flex flex-1 items-center justify-center text-sm">
+          <LoaderCircleIcon className="size-4 animate-spin" />
+        </div>
+      )}
+    </SidePanel>
   );
 }
 
@@ -103,6 +96,7 @@ function DrawerBody({
   loadFailed,
   demoControls,
   onWatch,
+  onShowInConversation,
   onClose,
 }: {
   view: ResponsibilityView;
@@ -110,45 +104,23 @@ function DrawerBody({
   loadFailed: boolean;
   demoControls: boolean;
   onWatch: () => void;
+  onShowInConversation: () => void;
   onClose: () => void;
 }) {
   const finished = isFinished(view);
-  const needsYou = view.humanStatus === "Needs you";
+  const next = finished ? null : nextLine(view);
+  const inConversation = useAuiState((s) =>
+    s.thread.messages.some(
+      (m) => responsibilityOf(m.metadata) === view.id,
+    ),
+  );
 
   return (
     <>
-      <header className="flex items-start gap-3 px-6 pt-6 pb-2">
-        <div className="min-w-0 flex-1">
-          <DialogPrimitive.Title className="font-heading text-xl leading-tight font-medium tracking-tight">
-            {view.title}
-          </DialogPrimitive.Title>
-          <DialogPrimitive.Description
-            className={cn(
-              "text-muted-foreground mt-1 flex items-center gap-2 text-sm",
-              needsYou && "text-attention-foreground font-medium",
-            )}
-          >
-            {view.active && (
-              <span className="bg-live relative flex size-2 rounded-full" aria-hidden>
-                <span className="bg-live absolute inset-0 animate-ping rounded-full opacity-50 motion-reduce:hidden" />
-              </span>
-            )}
-            {view.humanStatus}
-            {!finished && view.nextWakeAt && (
-              <span className="text-muted-foreground/80 font-normal">
-                · next check {formatWhen(view.nextWakeAt)}
-              </span>
-            )}
-          </DialogPrimitive.Description>
-        </div>
-        <DialogPrimitive.Close render={<Button variant="ghost" size="icon-sm" />}>
-          <XIcon />
-          <span className="sr-only">Close</span>
-        </DialogPrimitive.Close>
-      </header>
+      <SidePanelHeader title={view.title} />
 
-      <div className="flex-1 overflow-y-auto px-6 pt-3 pb-8">
-        <div className="flex flex-col gap-9">
+      <div className="flex-1 overflow-y-auto px-6 pt-2 pb-8">
+        <div className="flex flex-col gap-8">
           <div className="flex flex-col gap-4">
             {detail?.standing ? (
               <MarkdownBlock className="text-foreground text-[15px]">{detail.standing}</MarkdownBlock>
@@ -159,18 +131,46 @@ function DrawerBody({
             ) : null}
             {detail && detail.facts.length > 0 && (
               <ul className="flex flex-wrap gap-1.5" aria-label="Key facts">
-                {detail.facts.map((f) => (
+                {detail.facts.slice(0, FACT_LIMIT).map((f) => (
                   <li key={f} className="bg-muted/70 text-muted-foreground rounded-full px-2.5 py-0.5 text-xs">
                     {f}
                   </li>
                 ))}
               </ul>
             )}
-            {view.liveViewUrl && (
-              <Button variant="outline" className="self-start rounded-full" onClick={onWatch}>
-                <MonitorPlayIcon />
-                Watch browser
-              </Button>
+            {next && (
+              <p
+                className={cn(
+                  "text-muted-foreground flex items-center gap-2 text-sm",
+                  next.attention && "text-attention-foreground font-medium",
+                )}
+              >
+                {view.active && (
+                  <span className="bg-live relative flex size-2 rounded-full" aria-hidden>
+                    <span className="bg-live absolute inset-0 animate-ping rounded-full opacity-50 motion-reduce:hidden" />
+                  </span>
+                )}
+                {next.text}
+              </p>
+            )}
+            {(view.liveViewUrl || inConversation) && (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                {view.liveViewUrl && (
+                  <Button variant="outline" className="rounded-full" onClick={onWatch}>
+                    <MonitorPlayIcon />
+                    Watch browser
+                  </Button>
+                )}
+                {inConversation && (
+                  <button
+                    type="button"
+                    onClick={onShowInConversation}
+                    className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 transition-colors hover:underline"
+                  >
+                    Show in conversation
+                  </button>
+                )}
+              </div>
             )}
           </div>
 
@@ -181,16 +181,10 @@ function DrawerBody({
             </p>
           )}
 
-          {detail && detail.moments.length > 0 && (
-            <Section title="Timeline">
-              <MomentsTimeline moments={detail.moments} />
-            </Section>
-          )}
-
           {detail && detail.sources.length > 0 && (
-            <Section title="Sources">
+            <PanelSection title="Sources">
               <SourcesSection groups={detail.sources} />
-            </Section>
+            </PanelSection>
           )}
 
           {detail && (detail.goal || detail.successCriteria.length > 0) && (
@@ -209,10 +203,30 @@ function DrawerBody({
   );
 }
 
+/** Message metadata from GET /api/messages lands in `custom`. */
+function responsibilityOf(metadata: unknown): string | null {
+  const custom = (metadata as { custom?: { responsibilityId?: unknown } } | null)?.custom;
+  return typeof custom?.responsibilityId === "string" ? custom.responsibilityId : null;
+}
+
+/** What happens next, for responsibilities that are still open. */
+function nextLine(view: ResponsibilityView): { text: string; attention: boolean } | null {
+  if (view.humanStatus === "Needs you") return { text: "Waiting for your OK", attention: true };
+  if (view.active) return { text: "Working on it now", attention: false };
+  const check = view.nextWakeAt ? `Next check ${formatWhen(view.nextWakeAt)}` : null;
+  if (view.status === "waiting_external") {
+    const text = view.nextWakeAt
+      ? `Waiting for a reply · next check ${formatWhen(view.nextWakeAt)}`
+      : "Waiting for a reply";
+    return { text, attention: false };
+  }
+  return check ? { text: check, attention: false } : null;
+}
+
 function standingFallback(view: ResponsibilityView, detail: ResponsibilityDetail): string {
-  if (view.waitingOn && !isFinished(view)) return `${view.humanStatus}: waiting on ${view.waitingOn}.`;
-  if (detail.nextAction && !isFinished(view)) return `${view.humanStatus}. Next: ${detail.nextAction}`;
-  return `${view.humanStatus}.`;
+  if (isFinished(view)) return `${view.humanStatus}.`;
+  if (view.waitingOn) return `Waiting on ${view.waitingOn}.`;
+  return detail.nextAction ?? `${view.humanStatus}.`;
 }
 
 /** Goal and "Done when", tucked away by default. */
@@ -306,23 +320,6 @@ function CancelControl({
       </div>
       {error && <p className="text-irreversible text-sm">{error}</p>}
     </div>
-  );
-}
-
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section>
-      <h3 className="text-muted-foreground mb-2 text-[11px] font-semibold tracking-[0.12em] uppercase">
-        {title}
-      </h3>
-      {children}
-    </section>
   );
 }
 

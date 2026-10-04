@@ -199,7 +199,8 @@ export function useAugustState(): AugustStore {
   );
 
   const loadDetail = useCallback<AugustStore["loadDetail"]>(async (id) => {
-    if (mockRef.current) return mockDetail(id);
+    // Read the flag directly too: a deep-linked drawer can load before the ref syncs.
+    if (mockRef.current || readMockFlag()) return mockDetail(id);
     try {
       const res = await fetch(
         `/api/responsibilities/${encodeURIComponent(id)}`,
