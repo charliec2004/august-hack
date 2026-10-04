@@ -10,6 +10,8 @@ import { brainAgent } from "@/server/agent/brain";
 import { gatewayProviderOptions, modelConfigured } from "@/server/agent/model";
 import { currentUser } from "@/server/auth/currentUser";
 import { ensurePrimaryThread, insertMessage, recentMessages } from "@/server/db/messages";
+import { captureMemories } from "@/server/memory/memories";
+import { updateThreadSummary, VERBATIM_TAIL } from "@/server/memory/summary";
 import { trace } from "@/server/db/traces";
 import { describeUi, isGenUiTool, stripHistoryLines } from "@/lib/genui";
 
@@ -92,10 +94,10 @@ export async function POST(req: Request) {
     return staticReply(reply);
   }
 
-  const agent = await brainAgent({ userId: user.id, threadId, sourceMessageId: msg.id });
+  const agent = await brainAgent({ userId: user.id, threadId, sourceMessageId: msg.id }, text);
   // Postgres is the conversation of record (includes updates August delivered
   // asynchronously); only the recent tail goes to the model (spec 15).
-  const history = await recentMessages(user.id, threadId, 24);
+  const history = await recentMessages(user.id, threadId, VERBATIM_TAIL);
   const stream = await agent.stream(
     history
       .filter((m) => m.role !== "system")
@@ -112,6 +114,9 @@ export async function POST(req: Request) {
         await insertMessage({ threadId, userId: user.id, role: "assistant", content, parts });
         await trace({ userId: user.id, kind: "brain.delivered", detail: { deliveryKind: "turn" } });
       }
+      // Forever chat: remember durable facts, and fold old messages into the running summary.
+      await captureMemories({ userId: user.id, sourceMessageId: msg.id, userText: text, assistantText: content });
+      await updateThreadSummary(user.id, threadId);
     } catch (e) {
       console.error("persist assistant turn failed:", (e as Error).message);
     }

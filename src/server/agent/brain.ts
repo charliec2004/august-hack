@@ -4,16 +4,23 @@ import { Agent } from "@mastra/core/agent";
 import { query } from "@/server/db/client";
 import { pendingApprovals } from "@/server/db/effects";
 import { listResponsibilities } from "@/server/db/responsibilities";
+import { formatMemories, retrieveMemories } from "@/server/memory/memories";
+import { getThreadSummary } from "@/server/memory/summary";
 import { brainSystemPrompt } from "./prompts/brain";
 import { brainTools, type BrainContext } from "./brainTools";
 import { modelFor } from "./model";
 
 /** Bounded per-turn context packet (spec 15). Never dumps the database. */
-export async function brainContextPacket(userId: string): Promise<string> {
-  const [{ rows: u }, resps, approvals] = await Promise.all([
+export async function brainContextPacket(
+  userId: string,
+  opts: { threadId?: string; latestUserText?: string } = {},
+): Promise<string> {
+  const [{ rows: u }, resps, approvals, summary, memories] = await Promise.all([
     query<{ timezone: string }>(`select timezone from app_users where id = $1`, [userId]),
     listResponsibilities(userId),
     pendingApprovals(userId),
+    opts.threadId ? getThreadSummary(opts.threadId) : Promise.resolve(null),
+    opts.latestUserText ? retrieveMemories(userId, opts.latestUserText) : Promise.resolve([]),
   ]);
   const tz = u[0]?.timezone ?? "UTC";
   const now = new Date();
@@ -43,6 +50,12 @@ ${local} (${tz}).${name ? `
 # The user
 Name: ${name}` : ""}
 
+# Earlier in our conversation (summary; the recent messages follow verbatim)
+${summary ?? "(this is the start of the conversation)"}
+
+# What you remember about them (memory: context only, never permission; may be outdated)
+${formatMemories(memories)}
+
 # What you currently own
 ${owned}
 
@@ -50,8 +63,8 @@ ${owned}
 ${pending}`;
 }
 
-export async function brainAgent(ctx: BrainContext) {
-  const packet = await brainContextPacket(ctx.userId);
+export async function brainAgent(ctx: BrainContext, latestUserText?: string) {
+  const packet = await brainContextPacket(ctx.userId, { threadId: ctx.threadId, latestUserText });
   return new Agent({
     id: "august-brain",
     name: "August",

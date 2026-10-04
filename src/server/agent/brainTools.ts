@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createTool } from "@mastra/core/tools";
+import { forgetMemories, retrieveMemories } from "@/server/memory/memories";
 import { z } from "zod";
 import { tx } from "@/server/db/client";
 import {
@@ -135,11 +136,27 @@ export function brainTools(ctx: BrainContext) {
     }),
   });
 
+  const memory_forget = createTool({
+    id: "memory_forget",
+    description: "Forget something about the user when they ask you to (e.g. 'forget my old address').",
+    inputSchema: z.object({ about: z.string().min(3).describe("What to forget, in the user's words") }),
+    execute: async ({ about }) => ({ forgotten: await forgetMemories(ctx.userId, about) }),
+  });
+
+  const memory_search = createTool({
+    id: "memory_search",
+    description: "Look up what you remember about the user beyond what's already in context.",
+    inputSchema: z.object({ query: z.string().min(3) }),
+    execute: async ({ query: q }) => ({ memories: await retrieveMemories(ctx.userId, q, 8) }),
+  });
+
   return {
     responsibility_create,
     responsibility_update,
     responsibility_list,
     responsibility_cancel,
+    memory_forget,
+    memory_search,
     ...uiTools(),
   };
 }

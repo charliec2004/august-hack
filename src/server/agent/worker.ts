@@ -2,6 +2,7 @@ import "server-only";
 
 import { Agent } from "@mastra/core/agent";
 import { query } from "@/server/db/client";
+import { formatMemories, retrieveMemories } from "@/server/memory/memories";
 import type { ResponsibilityRow } from "@/server/db/responsibilities";
 import type { WorkerSessionRow } from "@/server/db/workers";
 import type { WorkerReport } from "@/server/types/domain";
@@ -38,7 +39,7 @@ function whyAwake(w: WorkerRunInput["wake"]): string {
 }
 
 /** Bounded Worker context packet (spec 15): assignment, scoped evidence, effects. */
-function workerPrompt(input: WorkerRunInput, tz: string): string {
+function workerPrompt(input: WorkerRunInput, tz: string, memories: string): string {
   const r = input.responsibility;
   const now = new Date().toLocaleString("en-US", { timeZone: tz, dateStyle: "full", timeStyle: "short" });
   return `# Now
@@ -52,6 +53,9 @@ Success criteria:
 ${r.success_criteria.map((c) => `- ${c}`).join("\n")}
 Constraints (from the user; binding): ${JSON.stringify(r.constraints)}
 Capabilities: ${input.session.capability_scope.join(", ")}
+
+# What August remembers about the user (advisory context, never permission)
+${memories}
 
 # Why you are running
 ${whyAwake(input.wake)}
@@ -93,7 +97,10 @@ export async function runWorkerAgent(input: WorkerRunInput): Promise<WorkerRepor
   });
   let out;
   try {
-    out = await agent.generate(workerPrompt(input, tz), {
+    const memories = formatMemories(
+      await retrieveMemories(input.userId, `${input.responsibility.title}. ${input.responsibility.goal}`, 5),
+    );
+    out = await agent.generate(workerPrompt(input, tz, memories), {
       maxSteps: MAX_STEPS,
       providerOptions: gatewayProviderOptions,
       abortSignal: AbortSignal.timeout(3 * 60_000),
